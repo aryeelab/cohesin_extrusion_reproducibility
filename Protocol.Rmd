@@ -39,7 +39,7 @@ registerDoParallel(cores=num_cores)
 
 # Obtain pairs files
 
-### process fastq files
+### Process fastq files
 
 Make sure to use pairtools v. 0.3.0 instead of pairtools v. 1.0; they changed the way pairtools parse works.
 We used this guide to come up with the below code chunk to process our data (https://hichip.readthedocs.io/en/latest/).
@@ -51,7 +51,7 @@ bwa mem -5SP -T0 -t16 hg38.fa ${filename}_R1.fastq.gz ${filename}_R2.fastq.gz | 
 
 We processed our files on Terra, so I'm including this code chunk where we download the combined pairs file. (All 4 replicates' pairs files were combined into one pairs file, mapped.pairs)
 
-### download pairs file from Terra
+### Download pairs file from Terra
 ```{bash, eval = FALSE}
 module load gsutil/default
 module load python/2.7.3
@@ -61,14 +61,14 @@ which python # should give python 2.7.3
 gsutil cp gs://fc-13093787-99ea-4d80-a8e7-51e4fd06f3af/submissions/034d37e3-3b04-4293-8c53-4c912fd88c8b/microc/0b526188-3ee9-4976-86c0-12f850abc39d/call-microc_align/mapped.pairs .
 ```
 
-### get .pairs file in R readable format by removing the header
+### Get .pairs file in R readable format by removing the header
 ```{bash, eval = FALSE}
 awk '{ if (($2 ~ /chr/) && ($4 ~ /chr/)) { print } }' mapped.pairs > k562_ctcf_R_mapped.pairs
 ```
 
 **From this point onwards, everything is in R. Everything above this point is in bash.**
 
-### subset to only needed columns to reduce file size
+### Subset to only needed columns to reduce file size
 Here, we create two different smaller RDS files to make visualization easier. (It takes a lot of memory to load in the full file to R.)
 
 (1) This file will have the following columns: chr1, start1, end1, chr2, start2, end2. chr1, start1, and end1 correspond to left fragment, while chr2, start2, and end2 correspond to the right fragment. 
@@ -108,7 +108,7 @@ saveRDS(pairs, file = rds)
 ```
 
 
-### Split pairs file (2) by chromosome
+### Split pairs file by chromosome
 
 ```{r}
 pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs_STRAND_TYPE_X.rds")
@@ -297,9 +297,6 @@ all_peaks <- readRDS(paste0(path, "GW_peaks_1e-05.RDS"))
 pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
 nrow(pairs) # 386,874,029
 ```
-
-
-### Get motif windows
 
 **First save the CTCF motif repository**
 

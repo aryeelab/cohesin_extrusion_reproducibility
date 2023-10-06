@@ -1,18 +1,16 @@
 
 - [Obtain pairs files](#obtain-pairs-files)
-  - [process fastq files](#process-fastq-files)
-  - [download pairs file from Terra](#download-pairs-file-from-terra)
-  - [get .pairs file in R readable format by removing the
+  - [Process fastq files](#process-fastq-files)
+  - [Download pairs file from Terra](#download-pairs-file-from-terra)
+  - [Get .pairs file in R readable format by removing the
     header](#get-pairs-file-in-r-readable-format-by-removing-the-header)
-  - [subset to only needed columns to reduce file
+  - [Subset to only needed columns to reduce file
     size](#subset-to-only-needed-columns-to-reduce-file-size)
-  - [Split pairs file (2) by
-    chromosome](#split-pairs-file-2-by-chromosome)
+  - [Split pairs file by chromosome](#split-pairs-file-by-chromosome)
 - [Generate p-value table](#generate-p-value-table)
 - [Run FactorFinder](#run-factorfinder)
 - [Obtain fragments overlapping
   motifs](#obtain-fragments-overlapping-motifs)
-  - [Get motif windows](#get-motif-windows)
 - [Annotate left fragments overlapping CTCF (+)
   motifs](#annotate-left-fragments-overlapping-ctcf--motifs)
 - [Classify fragments by chromatin
@@ -48,7 +46,7 @@ registerDoParallel(cores=num_cores)
 
 # Obtain pairs files
 
-### process fastq files
+### Process fastq files
 
 Make sure to use pairtools v. 0.3.0 instead of pairtools v. 1.0; they
 changed the way pairtools parse works. We used this guide to come up
@@ -66,7 +64,7 @@ We processed our files on Terra, so I’m including this code chunk where
 we download the combined pairs file. (All 4 replicates’ pairs files were
 combined into one pairs file, mapped.pairs)
 
-### download pairs file from Terra
+### Download pairs file from Terra
 
 ``` bash
 module load gsutil/default
@@ -77,7 +75,7 @@ which python # should give python 2.7.3
 gsutil cp gs://fc-13093787-99ea-4d80-a8e7-51e4fd06f3af/submissions/034d37e3-3b04-4293-8c53-4c912fd88c8b/microc/0b526188-3ee9-4976-86c0-12f850abc39d/call-microc_align/mapped.pairs .
 ```
 
-### get .pairs file in R readable format by removing the header
+### Get .pairs file in R readable format by removing the header
 
 ``` bash
 awk '{ if (($2 ~ /chr/) && ($4 ~ /chr/)) { print } }' mapped.pairs > k562_ctcf_R_mapped.pairs
@@ -86,7 +84,7 @@ awk '{ if (($2 ~ /chr/) && ($4 ~ /chr/)) { print } }' mapped.pairs > k562_ctcf_R
 **From this point onwards, everything is in R. Everything above this
 point is in bash.**
 
-### subset to only needed columns to reduce file size
+### Subset to only needed columns to reduce file size
 
 Here, we create two different smaller RDS files to make visualization
 easier. (It takes a lot of memory to load in the full file to R.)
@@ -133,7 +131,7 @@ pairs$pair_ID <- 1:nrow(pairs)
 saveRDS(pairs, file = rds)
 ```
 
-### Split pairs file (2) by chromosome
+### Split pairs file by chromosome
 
 ``` r
 pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs_STRAND_TYPE_X.rds")
@@ -335,8 +333,6 @@ fragment.*
 pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
 nrow(pairs) # 386,874,029
 ```
-
-### Get motif windows
 
 **First save the CTCF motif repository**
 
