@@ -8,7 +8,7 @@ output:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.path = "/aryeelab/users/corri/code/cohesin_extrusion_reproducibility/Figures/protocol-",
+  fig.path = "Figures/protocol-",
   out.width = "100%", 
   eval = FALSE
 )

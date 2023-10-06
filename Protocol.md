@@ -596,7 +596,7 @@ ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
 
-<img src="/aryeelab/users/corri/code/cohesin_extrusion_reproducibility/Figures/protocol-correlation_heatmap-1.png" width="100%" />
+<img src="Figures/protocol-correlation_heatmap-1.png" width="100%" />
 
 *Based on this correlation heatmap, we can directly observe that Active
 chromatin annotations group together (TSS, Enhancer, and Transcription
@@ -735,7 +735,7 @@ UM_scaled %>%
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
 
-<img src="/aryeelab/users/corri/code/cohesin_extrusion_reproducibility/Figures/protocol-cluster_heatmap-1.png" width="100%" />
+<img src="Figures/protocol-cluster_heatmap-1.png" width="100%" />
 
 *Clusters look good! We just need to download some more files, then we
 can move onto visualizing.*
