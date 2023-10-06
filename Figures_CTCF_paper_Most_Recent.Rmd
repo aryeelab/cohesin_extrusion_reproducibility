@@ -1,0 +1,4564 @@
+---
+title: "CTCF_Figures_Jun15_2023"
+output: html_notebook
+date: "2023-06-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(foreach)
+library(GenomicRanges)
+library(readr)
+library(rtracklayer)
+library(scales)
+library(plyranges)
+library(nlme)
+library(lme4)
+library(viridis)
+library(ggridges)
+library(RColorBrewer)
+library(cowplot)
+library(gridExtra)
+library(doParallel)
+library(data.table)
+library(Signac)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+
+num_cores = 8
+registerDoParallel(cores=num_cores)
+```
+
+# Set the path
+This is where we stored all those files in the protocol.
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+```
+
+
+# FIGURE 1
+```{r}
+print("read pairs")
+pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
+print("done reading pairs")
+
+nrow(pairs) # 386,874,029
+```
+
+```{r}
+FL_1 <- pairs$end1-pairs$start1
+FL_2 <- pairs$end2-pairs$start2
+
+FL <- c(FL_1,FL_2)
+
+min(FL)
+```
+
+
+```{r, fig.width = 6, fig.height = 4}
+FL_1 <- pairs$end1-pairs$start1
+FL_2 <- pairs$end2-pairs$start2
+
+FL <- c(FL_1,FL_2)
+FL <- data.frame(width = FL)
+b <- c(0, 80, 120, 151)
+
+# Fragment 1
+FL$width_bin <- cut(FL$width, breaks=b)
+
+freq<- FL %>% 
+  filter(!is.na(width_bin)) %>% 
+  group_by(width_bin) %>% 
+  summarize(count = n()) %>% 
+  mutate(freq = count /sum(count))
+
+freq %>% 
+  ggplot( aes(x="", y=freq, fill = width_bin)) +
+  geom_col() +
+  geom_text(aes(label = paste0(width_bin, ": ",100*round(freq, 3), "%" )), colour = "black",position = position_stack(vjust = 0.5),
+            family = "Times New Roman",size = 6, fontface = "bold") +
+  theme_classic()+
+  xlab("")+
+  ylab("Frequency") +
+     theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold")) +
+  scale_fill_manual(values = c("slategray1", "royalblue", "darkred")) +
+  guides(fill=guide_legend(title="Fragment Length"))
+
+ggsave(paste0(path,"1_FL_bar.png"), width=6, height=4)
+```
+
+### Overlap fragments w/ motifs
+
+```{r}
+# left fragment
+gr_fragment1 <- makeGRangesFromDataFrame(pairs,
+                                 seqnames.field="chr1",
+                                 start.field="start1",
+                                 end.field="end1")
+# right fragment
+gr_fragment2 <- makeGRangesFromDataFrame(pairs,
+                                 seqnames.field="chr2",
+                                 start.field="start2",
+                                 end.field="end2")
+gr_fragment <- c(gr_fragment1, gr_fragment2)
+```
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+anchors <- chip_gr %>% 
+  plyranges::anchor_center() %>% 
+  plyranges::mutate(width = 60)
+```
+
+
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+
+# Subset to 19bp (vs 34bp, 35bp) CTCF motifs that overlap a hires anchor
+# NOTE: In the current input file, they are all 19bp
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+# Remove overlapping motifs
+keep <- countOverlaps(gr_motifs, gr_motifs, ignore.strand=TRUE)==1 
+table(keep)
+gr_motifs <- gr_motifs[keep]
+keep <- countOverlaps(gr_motifs, anchors, maxgap = 0)>=1 
+table(keep) 
+gr_motifs <- gr_motifs[keep]
+gr_motifs$motif_mid <- round(start(gr_motifs) + width(gr_motifs)/2)
+```
+
+
+
+```{r}
+gr_fragment80 <- gr_fragment[width(gr_fragment)<=80]
+keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
+100*length(keep)/length(gr_fragment80)
+```
+
+*6.43%*
+
+```{r}
+gr_fragment80 <- gr_fragment[ (width(gr_fragment)>80) & (width(gr_fragment)<=120) ]
+keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
+100*length(keep)/length(gr_fragment80)
+```
+
+*2.11%*
+
+```{r}
+gr_fragment80 <- gr_fragment[width(gr_fragment)>120]
+keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
+100*length(keep)/length(gr_fragment80)
+
+min(width(gr_fragment80))
+```
+
+*0.64%*
+
+*Note: it's much too big to try and graph the distribution of fragments for the entire genome. chr1 is a representative sample, so this is an appropriate approximation.*
+```{r}
+chr1 <- gr_fragment[seqnames(gr_fragment) == "chr1"]
+
+
+p1 <- data.frame(wid = width(chr1)) %>% 
+  ggplot(aes(x = wid))+
+  geom_histogram(fill = "navy", col = "royalblue", binwidth = 10)+
+  scale_x_continuous(breaks = seq(10, 150, 20), limits = c(0, 160))+
+  theme_classic()+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold")) +
+  xlab("Fragment Length")+
+  ylab("Count") +
+  ggtitle("Fragment Length Distribution")
+p1
+```
+
+```{r}
+keep <- subsetByOverlaps(gr_fragment, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
+
+data.frame(wid = width(keep)) %>% 
+  ggplot(aes(x = wid))+
+  geom_histogram(fill = "navy", col = "royalblue", binwidth = 10)+
+   scale_x_continuous(breaks = seq(10, 150, 20), limits = c(0, 160))+
+  theme_classic()+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold")) +
+  xlab("Fragment Length")+
+  ylab("Density")+
+    ggtitle("Fragment Length Distribution (Fragments overlapping CBS)")
+
+p2
+```
+
+
+```{r, fig.width =8,fig.height = 5}
+plot_grid(plotlist =list(p1,p2), align = "hv", axis = "tblr",ncol = 1)
+#ggsave(paste0(path,"1D_FL_dist.png"), width=8, height=5)
+```
+
+### Coverage plots
+
+
+```{r}
+all_peaks <- readRDS(paste0(path, "GW_peaks_1e-05.RDS"))
+
+all_peaks <- all_peaks %>% 
+  dplyr::rename(window_mid = start) %>% 
+  dplyr::select(-end)
+
+peaks_gr <- makeGRangesFromDataFrame(all_peaks, 
+                                     keep.extra.columns=FALSE,
+                                     seqnames.field = "seqnames",
+                                     start.field = "peak_summit", 
+                                     end.field = "peak_summit")
+
+peaks_gr$peak_mid <- start(peaks_gr)
+anchors <- peaks_gr
+
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+loops <- import("/aryeelab/users/corri/data/K562_CTCF_loops.bedpe")
+```
+
+
+```{r}
+# Subset to 19bp (vs 34bp, 35bp) CTCF motifs that overlap a hires anchor
+# NOTE: In the current input file, they are all 19bp
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+# Remove overlapping motifs
+keep <- countOverlaps(gr_motifs, gr_motifs, ignore.strand=TRUE)==1 
+table(keep)
+gr_motifs <- gr_motifs[keep]
+# subset to motifs overlapping peaks
+keep <- countOverlaps(gr_motifs, anchors, maxgap = 0)==1 
+table(keep)
+gr_motifs <- gr_motifs[keep]
+gr_motifs$motif_mid <- round( ( start(gr_motifs) + end(gr_motifs) )/2)
+# Annotate motifs with loop anchor status
+left_anchor <- countOverlaps(gr_motifs, loops@first)
+right_anchor <- countOverlaps(gr_motifs, loops@second)
+gr_motifs$loop_anchor <- "No anchor"
+gr_motifs$loop_anchor[left_anchor & !right_anchor] <- "Left anchor"
+gr_motifs$loop_anchor[!left_anchor & right_anchor] <- "Right anchor"
+gr_motifs$loop_anchor[left_anchor & right_anchor] <- "Both anchors"
+
+# Make windows centered on motifs
+gr_motifs_window <- resize(gr_motifs, width=1000, fix="center")
+# Remove overlapping windows
+keep <- countOverlaps(gr_motifs_window, gr_motifs_window, ignore.strand=TRUE)==1 
+table(keep)
+
+gr_motifs_window <- gr_motifs_window[keep]
+```
+
+```{r}
+num_cores = 8
+registerDoParallel(cores=num_cores)
+
+# Make a per-bp GRanges for the motif windows
+# length(gr_motifs_window)
+gr_motifs_window_bp <- foreach(i = 1:length(gr_motifs_window), .combine=c) %dopar% {
+  window=gr_motifs_window[i]
+  df_window <- data.frame(pos=start(window):end(window), pos_in_window=1:width(window), window_id=i, motif_strand = paste0(strand(window), " Motif"), loop_anchor=gr_motifs_window$loop_anchor[i]) 
+  gr_window <- GRanges(seqnames(window), IRanges(df_window$pos, df_window$pos))
+  mcols(gr_window) <- df_window[,c("window_id", "pos_in_window", "motif_strand", "loop_anchor")]
+  gr_window
+}
+
+# Make sure windows don't overlap
+table(countOverlaps(gr_motifs_window_bp, gr_motifs_window_bp))
+```
+
+
+```{r}
+# Fragment 1
+gr_fragment <- GRanges(pairs$chr1, IRanges(pairs$start1, pairs$end1))
+gr_fragment$width_bin <- as.factor("One_bin")
+
+cov_df1 <- foreach(size = levels(gr_fragment$width_bin), .combine=rbind) %dopar% {
+    if (sum(gr_fragment$width_bin == size, na.rm=TRUE) > 10) {
+        cov <- coverage(gr_fragment[which(gr_fragment$width_bin == size)])
+        foreach(chr = seqlevels(gr_fragment), .combine=rbind) %do% {
+            keep_pos <- gr_motifs_window_bp %>% filter(seqnames == chr) %>% start()
+            x <- as.vector(cov[[chr]])
+            data.frame(chr=chr, pos=keep_pos, size=size, cov=x[keep_pos], fragment="Left fragment") 
+        }
+    }
+}
+# Fragment 2
+gr_fragment <- GRanges(pairs$chr2, IRanges(pairs$start2, pairs$end2))
+gr_fragment$width_bin <- as.factor("One_bin")
+cov_df2 <- foreach(size = levels(gr_fragment$width_bin), .combine=rbind) %dopar% {
+    if (sum(gr_fragment$width_bin == size, na.rm=TRUE) > 10) {
+        cov <- coverage(gr_fragment[which(gr_fragment$width_bin == size)])
+        foreach(chr = seqlevels(gr_fragment), .combine=rbind) %do% {
+            keep_pos <- gr_motifs_window_bp %>% filter(seqnames == chr) %>% start()
+            x <- as.vector(cov[[chr]])
+            data.frame(chr=chr, pos=keep_pos, size=size, cov=x[keep_pos], fragment="Right fragment") 
+        }
+    }
+}
+cov_df <- rbind(cov_df1, cov_df2)
+gr_cov <- GRanges(cov_df$chr, IRanges(cov_df$pos, cov_df$pos))
+length(gr_cov)/1e6
+```
+
+```{r}
+ovl <- findOverlaps(gr_cov, gr_motifs_window_bp)
+df <- cbind(cov_df[queryHits(ovl),], 
+             as.data.frame(gr_motifs_window_bp[subjectHits(ovl)])) %>%
+            select(seqnames, pos, size, cov, window_id, pos_in_window, fragment, motif_strand)
+df <- cbind(df, 
+            motif_score=gr_motifs_window$score[df$window_id],
+            loop_anchor=gr_motifs_window$loop_anchor[df$window_id])
+df$size <- factor(df$size, levels=unique(df$size))
+df$fragment <- factor(df$fragment, levels=unique(df$fragment))
+df$loop_anchor <- factor(df$loop_anchor, levels=c("No anchor", "Left anchor", "Right anchor", "Both anchors"))
+#df
+```
+
+```{r}
+#saveRDS(df, file = paste0(path, "k562_ctcf_coverage_1000bp_nostratify.rds"))
+```
+
+```{r}
+df <- readRDS(file = paste0(path, "k562_ctcf_coverage_1000bp_nostratify.rds"))
+```
+
+
+```{r,fig.width =8, fig.height = 3}
+df %>% 
+  mutate(dist_to_motif_center = pos_in_window-500) %>% 
+  group_by(dist_to_motif_center) %>% 
+  summarise(cov=sum(cov, na.rm=T)) %>% 
+  ungroup() %>% 
+  ggplot(aes(dist_to_motif_center, cov)) + geom_line() + 
+  scale_x_continuous(breaks = seq(-400, 400, 200)) + 
+  xlab("Distance to CTCF motif center") + 
+  ylab("Total Coverage") +
+  theme_classic()+
+#  geom_vline(xintercept = 0, col = "royalblue", linetype = "dashed", linewidth = 1)+
+  theme(panel.grid.major = element_line(color = "grey92",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"))
+#ggsave(paste0(path,"1B_nofilt_Cov.png"), width=8, height=3)
+```
+*Approximation of nucleosome periodicity ~ 200bp*
+```{r}
+df %>% 
+    mutate(dist_to_motif_center = pos_in_window-500) %>% 
+    group_by(dist_to_motif_center) %>% 
+    summarise(cov=sum(cov, na.rm=T)) %>% 
+    ungroup() %>% 
+    ggplot(aes(dist_to_motif_center, cov)) + geom_line() + geom_vline(xintercept = 0, color="grey") + 
+ # geom_vline(xintercept = c(-60-147, -60,0,60, 60+147), color="slateblue", linetype = "dashed") + 
+  theme_bw() + 
+  scale_x_continuous(breaks = seq(-500, 500, 100)) + 
+  xlab("Distance to CTCF motif center") + 
+  ylab("Total Coverage") +
+   theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),  
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
+  geom_vline(xintercept = c(-130-200,-130, 130, 130+200), col = "red")
+```
+
+
+
+A version stratified by fragment length: 0-80, 80-120, 120-150.
+0-80, 80-120, 120-150
+
+```{r}
+b <- c(0, 80, 120, 151)
+# Fragment 1
+gr_fragment <- GRanges(pairs$chr1, IRanges(pairs$start1, pairs$end1))
+gr_fragment$width_bin <- cut(width(gr_fragment), breaks=b)
+
+cov_df1 <- foreach(size = levels(gr_fragment$width_bin), .combine=rbind) %dopar% {
+    if (sum(gr_fragment$width_bin == size, na.rm=TRUE) > 10) {
+        cov <- coverage(gr_fragment[which(gr_fragment$width_bin == size)])
+        foreach(chr = seqlevels(gr_fragment), .combine=rbind) %do% {
+            keep_pos <- gr_motifs_window_bp %>% filter(seqnames == chr) %>% start()
+            x <- as.vector(cov[[chr]])
+            data.frame(chr=chr, pos=keep_pos, size=size, cov=x[keep_pos], fragment="Left fragment") 
+        }
+    }
+}
+# Fragment 2
+gr_fragment <- GRanges(pairs$chr2, IRanges(pairs$start2, pairs$end2))
+gr_fragment$width_bin <- cut(width(gr_fragment), breaks=b)
+
+cov_df2 <- foreach(size = levels(gr_fragment$width_bin), .combine=rbind) %dopar% {
+    if (sum(gr_fragment$width_bin == size, na.rm=TRUE) > 10) {
+        cov <- coverage(gr_fragment[which(gr_fragment$width_bin == size)])
+        foreach(chr = seqlevels(gr_fragment), .combine=rbind) %do% {
+            keep_pos <- gr_motifs_window_bp %>% filter(seqnames == chr) %>% start()
+            x <- as.vector(cov[[chr]])
+            data.frame(chr=chr, pos=keep_pos, size=size, cov=x[keep_pos], fragment="Right fragment") 
+        }
+    }
+}
+cov_df <- rbind(cov_df1, cov_df2)
+gr_cov <- GRanges(cov_df$chr, IRanges(cov_df$pos, cov_df$pos))
+length(gr_cov)/1e6
+```
+ 
+# Annotate motif windows with coverage 
+```{r}
+ovl <- findOverlaps(gr_cov, gr_motifs_window_bp)
+df <- cbind(cov_df[queryHits(ovl),], 
+             as.data.frame(gr_motifs_window_bp[subjectHits(ovl)])) %>%
+            select(seqnames, pos, size, cov, window_id, pos_in_window, fragment, motif_strand)
+df <- cbind(df, 
+            motif_score=gr_motifs_window$score[df$window_id],
+            loop_anchor=gr_motifs_window$loop_anchor[df$window_id])
+df$size <- factor(df$size, levels=unique(df$size))
+df$fragment <- factor(df$fragment, levels=unique(df$fragment))
+df$loop_anchor <- factor(df$loop_anchor, levels=c("No anchor", "Left anchor", "Right anchor", "Both anchors"))
+df
+```
+
+```{r}
+#saveRDS(df, file = paste0(path, "k562_ctcf_coverage_1000bp_fragment_length.rds"))
+```
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+df <- readRDS(file = paste0(path, "k562_ctcf_coverage_1000bp_fragment_length.rds"))
+```
+
+
+```{r, fig.width = 8, fig.height = 5}
+df %>% 
+    mutate(dist_to_motif_center = pos_in_window-500) %>% 
+    group_by(dist_to_motif_center, size) %>% 
+    summarise(cov=sum(cov, na.rm=T)) %>% 
+    ungroup() %>% 
+    ggplot(aes(dist_to_motif_center, cov)) + geom_line() + 
+  facet_wrap(~size,ncol=1, scales = "free") +
+    scale_x_continuous(breaks = seq(-400, 400, 200)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 3))+
+  xlab("Distance to CTCF motif center") + 
+  ylab("Total Coverage") +
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+
+#ggsave(paste0(path,"1C_filt_Cov.png"), width=8, height=5)
+```
+
+### Figure 4B, D (cohesin footprint)
+```{r}
+print("read pairs")
+pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
+print("done reading pairs")
+```
+
+
+```{r}
+pairs <- pairs %>% 
+  mutate(interaction_length = end2-start1)
+
+pairs <- pairs %>% 
+  filter(interaction_length > 10000)
+
+#saveRDS(pairs_LR, "/aryeelab/users/corri/data/k562_ctcf_10kb_mapped.pairs.rds")
+```
+
+```{r}
+pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_10kb_mapped.pairs.rds")
+```
+
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+all_peaks <- readRDS(paste0(path, "GW_peaks_1e-05.RDS"))
+#all_peaks <- readRDS("/aryeelab/users/corri/results/June06_peaks_1e-05.RDS")
+all_peaks <- all_peaks %>% 
+  dplyr::rename(window_mid = start) %>% 
+  dplyr::select(-end)
+
+peaks_gr <- makeGRangesFromDataFrame(all_peaks, 
+                                     keep.extra.columns=FALSE,
+                                     seqnames.field = "seqnames",
+                                     start.field = "peak_summit", 
+                                     end.field = "peak_summit")
+
+peaks_gr$peak_mid <- start(peaks_gr)
+anchors <- peaks_gr
+
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+loops <- import("/aryeelab/users/corri/data/K562_CTCF_loops.bedpe")
+```
+
+
+```{r}
+# Subset to 19bp (vs 34bp, 35bp) CTCF motifs that overlap a hires anchor
+# NOTE: In the current input file, they are all 19bp
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+# Remove overlapping motifs
+keep <- countOverlaps(gr_motifs, gr_motifs, ignore.strand=TRUE)==1 
+table(keep)
+gr_motifs <- gr_motifs[keep]
+# subset to motifs overlapping peaks
+keep <- countOverlaps(gr_motifs, anchors, maxgap = 0)==1 # martin had > 1, which doesn't make any sense
+table(keep)
+gr_motifs <- gr_motifs[keep]
+gr_motifs$motif_mid <- round( ( start(gr_motifs) + end(gr_motifs) )/2)
+# Annotate motifs with loop anchor status
+left_anchor <- countOverlaps(gr_motifs, loops@first)
+right_anchor <- countOverlaps(gr_motifs, loops@second)
+gr_motifs$loop_anchor <- "No anchor"
+gr_motifs$loop_anchor[left_anchor & !right_anchor] <- "Left anchor"
+gr_motifs$loop_anchor[!left_anchor & right_anchor] <- "Right anchor"
+gr_motifs$loop_anchor[left_anchor & right_anchor] <- "Both anchors"
+
+# Make windows centered on motifs
+gr_motifs_window <- resize(gr_motifs, width=1000, fix="center")
+# Remove overlapping windows
+keep <- countOverlaps(gr_motifs_window, gr_motifs_window, ignore.strand=TRUE)==1 
+table(keep)
+
+gr_motifs_window <- gr_motifs_window[keep]
+```
+
+```{r}
+num_cores = 8
+registerDoParallel(cores=num_cores)
+
+# Make a per-bp GRanges for the motif windows
+# length(gr_motifs_window)
+gr_motifs_window_bp <- foreach(i = 1:length(gr_motifs_window), .combine=c) %dopar% {
+  window=gr_motifs_window[i]
+  df_window <- data.frame(pos=start(window):end(window), pos_in_window=1:width(window), window_id=i, motif_strand = paste0(strand(window), " Motif"), loop_anchor=gr_motifs_window$loop_anchor[i]) 
+  gr_window <- GRanges(seqnames(window), IRanges(df_window$pos, df_window$pos))
+  mcols(gr_window) <- df_window[,c("window_id", "pos_in_window", "motif_strand", "loop_anchor")]
+  gr_window
+}
+
+# Make sure windows don't overlap
+table(countOverlaps(gr_motifs_window_bp, gr_motifs_window_bp))
+```
+
+```{r}
+saveRDS(gr_motifs_window_bp, file = paste0(path, "gr_motifs_window_bp.rds"))
+```
+
+
+```{r}
+b <- c(0, 80, 120, 151) # old breaks
+
+# Fragment 1
+gr_fragment <- GRanges(pairs$chr1, IRanges(pairs$start1, pairs$end1))
+gr_fragment$width_bin <- cut(width(gr_fragment), breaks=b)
+
+cov_df1 <- foreach(size = levels(gr_fragment$width_bin), .combine=rbind) %dopar% {
+    if (sum(gr_fragment$width_bin == size, na.rm=TRUE) > 10) {
+        cov <- coverage(gr_fragment[which(gr_fragment$width_bin == size)])
+        foreach(chr = seqlevels(gr_fragment), .combine=rbind) %do% {
+            keep_pos <- gr_motifs_window_bp %>% filter(seqnames == chr) %>% start()
+            x <- as.vector(cov[[chr]])
+            data.frame(chr=chr, pos=keep_pos, size=size, cov=x[keep_pos], fragment="Left fragment") 
+        }
+    }
+}
+# Fragment 2
+gr_fragment <- GRanges(pairs$chr2, IRanges(pairs$start2, pairs$end2))
+gr_fragment$width_bin <- cut(width(gr_fragment), breaks=b)
+
+cov_df2 <- foreach(size = levels(gr_fragment$width_bin), .combine=rbind) %dopar% {
+    if (sum(gr_fragment$width_bin == size, na.rm=TRUE) > 10) {
+        cov <- coverage(gr_fragment[which(gr_fragment$width_bin == size)])
+        foreach(chr = seqlevels(gr_fragment), .combine=rbind) %do% {
+            keep_pos <- gr_motifs_window_bp %>% filter(seqnames == chr) %>% start()
+            x <- as.vector(cov[[chr]])
+            data.frame(chr=chr, pos=keep_pos, size=size, cov=x[keep_pos], fragment="Right fragment") 
+        }
+    }
+}
+cov_df <- rbind(cov_df1, cov_df2)
+gr_cov <- GRanges(cov_df$chr, IRanges(cov_df$pos, cov_df$pos))
+length(gr_cov)/1e6
+```
+ 
+# Annotate motif windows with coverage 
+```{r}
+ovl <- findOverlaps(gr_cov, gr_motifs_window_bp)
+df <- cbind(cov_df[queryHits(ovl),], 
+             as.data.frame(gr_motifs_window_bp[subjectHits(ovl)])) %>%
+            select(seqnames, pos, size, cov, window_id, pos_in_window, fragment, motif_strand)
+df <- cbind(df, 
+            motif_score=gr_motifs_window$score[df$window_id],
+            loop_anchor=gr_motifs_window$loop_anchor[df$window_id])
+df$size <- factor(df$size, levels=unique(df$size))
+df$fragment <- factor(df$fragment, levels=unique(df$fragment))
+df$loop_anchor <- factor(df$loop_anchor, levels=c("No anchor", "Left anchor", "Right anchor", "Both anchors"))
+df
+```
+
+
+```{r}
+saveRDS(df, file = paste0(path, "k562_ctcf_coverage_1000bp_fragment_length_LR.rds"))
+```
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+df_LR <- readRDS(file = paste0(path, "k562_ctcf_coverage_1000bp_fragment_length_LR.rds"))
+```
+
+```{r}
+uniq_motif <- df_LR %>% 
+   filter(pos_in_window == 500) %>% 
+  group_by(window_id) %>% 
+  dplyr::slice(1) %>% 
+  ungroup() %>% 
+  dplyr::select(seqnames, pos, window_id)
+
+uniq_motif_gr <- makeGRangesFromDataFrame(uniq_motif,
+                                 seqnames.field="seqnames",
+                                 start.field="pos",
+                                 end.field="pos",
+                                 keep.extra.columns = TRUE)
+
+uniq_motif_gr$motif_mid <- uniq_motif$pos
+```
+
+
+```{r}
+peaks <- read_tsv("/aryeelab/users/corri/data/K562_RAD21_ChIP_ENCFF330SHG.bed", col_names = FALSE)
+colnames(peaks) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+peaks_gr<- makeGRangesFromDataFrame(peaks, keep.extra.columns = TRUE)
+peaks_gr$peak_score <- peaks$qval
+peaks_gr$chip_mid <- (start(peaks_gr) + end(peaks_gr))/2
+
+peaks_gr <- peaks_gr %>%
+  plyranges::anchor_center() %>%
+  plyranges::mutate(width = 101)
+    #plyranges::mutate(width = 301)
+
+chip <- peaks_gr 
+
+ovl <- findOverlaps(uniq_motif_gr, chip, maxgap = 0)
+
+out <- as.data.frame(uniq_motif_gr[queryHits(ovl)]) %>% 
+    cbind(chip_id = subjectHits(ovl),
+          chip_start = start(chip)[subjectHits(ovl)],
+          chip_mid = chip$chip_mid[subjectHits(ovl)],
+          chip_end = end(chip)[subjectHits(ovl)],
+          chip_qval = chip$peak_score[subjectHits(ovl)],
+          chip_signalValue = chip$signalValue[subjectHits(ovl)],
+          chip_score = chip$score[subjectHits(ovl)]) %>% 
+  mutate(dist = abs(chip_mid - motif_mid))
+
+out <- out %>% 
+  group_by(window_id) %>% 
+  mutate(n = max(row_number())) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1) %>% 
+  dplyr::select(-c(seqnames))
+
+df_annot <- df_LR %>% 
+  left_join(out, by = "window_id") 
+
+max(abs(df_annot$dist), na.rm = TRUE)
+
+```
+
+```{r, fig.width = 8, fig.height = 5}
+df_LR %>% 
+    mutate(dist_to_motif_center = pos_in_window-500) %>% 
+    group_by(dist_to_motif_center, size) %>% 
+    summarise(cov=sum(cov, na.rm=T)) %>% 
+    ungroup() %>% 
+    ggplot(aes(dist_to_motif_center, cov)) + geom_line() + 
+  facet_wrap(~size,ncol=1, scales = "free") +
+    scale_x_continuous(breaks = seq(-150,150,50), limits = c(-150,150)) +
+  scale_y_continuous(breaks = pretty_breaks(n = 3))+
+  xlab("Distance to CTCF motif center") + 
+  ylab("Total Coverage") +
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+
+#ggsave(paste0(path,"filt_Cov_LR.png"), width=8, height=5)
+```
+
+
+```{r}
+all_motifs <- df_annot %>% 
+  group_by(window_id) %>% 
+  dplyr::slice(1)
+
+b <- quantile(all_motifs$chip_signalValue, na.rm = TRUE)
+b
+```
+
+```{r, fig.width = 6, fig.height = 3}
+p1 <- df_LR %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(pos, 30779763-500, 30779763+500)) %>% 
+  filter(fragment == "Right fragment") %>% 
+  filter(size == "(80,120]") %>% 
+  mutate(dist_to_motif_center = pos_in_window-500) %>% 
+  group_by(dist_to_motif_center, size, fragment) %>% 
+  summarise(cov=sum(cov, na.rm=T)) %>% 
+  ungroup() %>% 
+  ggplot(aes(dist_to_motif_center, cov)) + 
+  geom_line(linewidth = 3) + 
+    geom_vline(xintercept = 0, col = "firebrick3", linewidth = 1) +
+  #facet_wrap(fragment~size, scales = "free") +
+  theme_bw() +
+  scale_x_continuous(breaks = seq(-80,80, 20), limits = c(-80,80)) +
+ # scale_x_continuous(breaks = seq(-150, 150, 50), limits = c(-150,150)) +
+  xlab("Distance to CTCF motif center") +
+  ylab("Total Coverage") +
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+p1
+```
+
+```{r, fig.width = 8, fig.height = 4}
+p2 <- df_LR %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(pos, 30779763-500, 30779763+500)) %>% 
+  filter(fragment == "Right fragment") %>% 
+  filter(size == "(80,120]") %>% 
+  mutate(dist_to_motif_center = pos_in_window-500) %>% 
+  filter(dplyr::between(dist_to_motif_center, -150,150)) %>%
+  group_by(dist_to_motif_center, motif_strand, fragment) %>% 
+  summarise(cov=sum(cov, na.rm=T)) %>% 
+    ungroup() %>% 
+    mutate(side = ifelse(dist_to_motif_center < 0, "Negative","Positive")) %>% 
+  group_by(abs(dist_to_motif_center), motif_strand, fragment) %>% 
+   arrange(side) %>% # negative - positive
+  mutate(perc_dif = (dplyr::first(cov) - dplyr::last(cov)) / max(dplyr::first(cov), dplyr::last(cov))) %>%
+  mutate(dif = dplyr::first(cov) - dplyr::last(cov)) %>% 
+  dplyr::slice(1) %>% 
+    ggplot(aes(x = abs(dist_to_motif_center), y=dif)) + 
+  geom_smooth(span = 0.3, se = FALSE, col = "royalblue", linewidth = 3)+
+#  geom_line(linewidth = 1) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0,80, 20), limits = c(0,80)) +
+  xlab("Absolute distance to CTCF motif center") +
+  ylab("Difference in Coverage") +
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+
+p2
+```
+*Figure 4B*
+```{r, fig.width = 10, fig.height = 4}
+plot_grid(plotlist = list(p1,p2), align = "hv", axis = "tblr", ncol = 2)
+#ggsave(paste0(path,"locus_cov_dif_Fig4.png"), width=10, height=4)
+```
+
+*Figure 4D*
+
+```{r,fig.width = 10, fig.height = 5}
+dat <- df_annot %>%
+  mutate(RAD21 = cut(df_annot$chip_signalValue, breaks =  b)) %>% 
+  filter(RAD21 %in% c("(18.4,165]", "(534,5.91e+03]")) %>% 
+  filter(size == "(80,120]") %>% 
+  mutate(dist_to_motif_center = pos_in_window-500) %>% 
+  filter(dplyr::between(dist_to_motif_center, -150,150)) %>% 
+  group_by(dist_to_motif_center, RAD21,motif_strand, fragment) %>% 
+  summarise(cov=sum(cov, na.rm=T)) %>% 
+    ungroup() %>% 
+    mutate(motif_strand = factor(motif_strand, levels=c("+ Motif", "- Motif"))) %>% 
+     mutate(side = ifelse(dist_to_motif_center < 0, "Negative","Positive")) %>% 
+  group_by(abs(dist_to_motif_center), RAD21, motif_strand, fragment) %>% 
+   arrange(side) %>% # negative - positive
+  mutate(perc_dif = (dplyr::first(cov) - dplyr::last(cov)) / max(dplyr::first(cov), dplyr::last(cov))) %>%
+  mutate(dif = ifelse(motif_strand == "- Motif", 
+                      dplyr::first(cov) - dplyr::last(cov), 
+                      dplyr::last(cov) - dplyr::first(cov))) %>% 
+   arrange(side) %>% 
+  dplyr::slice(1) %>% 
+    mutate(type = paste0(motif_strand, ",",fragment)) %>%
+  mutate(type_cat = ifelse(type %in% c("+ Motif,Left fragment", "- Motif,Right fragment"),"1","0")) %>% 
+  group_by(dist_to_motif_center, RAD21, type_cat) %>% 
+  mutate(dif = sum(dif)) %>% 
+  dplyr::slice(1)  
+
+dat %>%   
+  mutate(type_cat = factor(type_cat, levels=c("1", "0"))) %>% 
+  ggplot(aes(x = abs(dist_to_motif_center), y=dif, col = paste0(RAD21, type_cat))) + 
+  geom_smooth(span = 0.7, se = FALSE, linewidth = 3)+
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0,80, 20), limits = c(0,80)) +
+  scale_y_continuous(limits = c(0, 12050))+
+  xlab("Absolute distance to CTCF motif center") +
+  ylab("Difference in Coverage") +
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  scale_color_manual(values = c("firebrick3","lightskyblue","darkred","royalblue"))
+
+#ggsave(paste0(path,"cohesin_Fig1.png"), width=10, height=7)
+```
+
+
+### ctcf occupancy figure (Figure 4A)
+
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+ctcf_motifs$motif_mid <- round( ( start(ctcf_motifs) + end(ctcf_motifs) )/2)
+# Remove overlapping motifs
+keep <- countOverlaps(ctcf_motifs, ctcf_motifs, ignore.strand=TRUE)==1 
+table(keep)
+ctcf_motifs <- ctcf_motifs[keep]
+```
+
+```{r}
+print("read pairs")
+pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
+print("done reading pairs")
+pairs <- pairs %>% 
+  filter(chr1 == "chr1") %>% 
+  filter(chr2 == "chr1")
+```
+
+```{r}
+# left fragment
+gr_fragment1 <- makeGRangesFromDataFrame(pairs,
+                                 seqnames.field="chr1",
+                                 start.field="start1",
+                                 end.field="end1")
+# right fragment
+gr_fragment2 <- makeGRangesFromDataFrame(pairs,
+                                 seqnames.field="chr2",
+                                 start.field="start2",
+                                 end.field="end2")
+gr_fragment <- c(gr_fragment1, gr_fragment2)
+```
+
+### High CTCF occupancy example (4A)
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+ctcf_motifs$motif_mid <- round( ( start(ctcf_motifs) + end(ctcf_motifs) )/2)
+# Remove overlapping motifs
+keep <- countOverlaps(ctcf_motifs, ctcf_motifs, ignore.strand=TRUE)==1 
+table(keep)
+ctcf_motifs <- ctcf_motifs[keep]
+
+
+motif <- ctcf_motifs %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(start, 30779762 - 500,	30779762 + 500))
+
+ctcf_loc <- (30779763	+30779781)/2
+```
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+data.frame(chip_gr) %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(peak_mid, ctcf_loc - 500,	ctcf_loc + 500))
+```
+
+
+```{r,fig.width = 6, fig.height = 3}
+bw.plot <- BigwigTrack(
+  region =  GRanges("chr1", IRanges(ctcf_loc - 500,	ctcf_loc + 500)),
+  bigwig = list(" " = paste0(path,"K562_CTCF_signal_pval_ENCFF168IFW.bigWig")))
+
+bw.plot+
+   geom_vline(xintercept = ctcf_loc, col = "firebrick3") +
+  ylab("Coverage") +
+  scale_fill_manual(values=c("black"))+
+     theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
+     guides(fill = "none")+
+  scale_x_continuous(
+    labels = comma_format(),
+    breaks = ctcf_loc+c(-450,  0,  450),
+    position = "top",
+    sec.axis = sec_axis(~. - ctcf_loc, name = "Distance to CTCF motif center",
+                                         breaks = c(-450,-300, -150, 0, 150, 300,450))) +
+  ylab("CTCF ChIP-seq Coverage")
+
+#ggsave(paste0(path,"4_chip_occupied.png"), width=6, height=3)
+```
+
+CBS (-) located at chr1: 30779763-30779781
+```{r}
+motif
+```
+
+```{r}
+keep <- subsetByOverlaps(gr_fragment, motif, maxgap = 0, ignore.strand=TRUE) 
+
+locus_fragments <- as.data.frame(keep) %>% 
+  cbind(motif_mid = (start(motif)+end(motif))/2) %>% 
+  dplyr::mutate(
+    frag_id = dplyr::row_number(),
+    start_centered = start - motif_mid,
+    end_centered = end - motif_mid,
+    num_frags_at_motif = max(dplyr::row_number()),
+    downstream_frags = sum(end_centered>60),
+    upstream_frags = sum(start_centered<(-60)),
+    skew = log2((downstream_frags+1)/(upstream_frags+1)))
+```
+
+```{r}
+locus_fragments %>% 
+  filter(width < 120) %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  dplyr::summarize(count = dplyr::n()) %>% 
+  mutate(occupancy = 100*(count / nrow(locus_fragments)))
+```
+
+```{r,fig.width = 8, fig.height = 3}
+p1 <-locus_fragments%>% 
+  arrange(width) %>% 
+  mutate(frag_id = row_number()) %>% 
+  ggplot() + 
+  geom_point(aes(x = end_centered, y = width), col = "royalblue")+
+  geom_point(aes(x = start_centered, y = width), col = "royalblue")+
+  geom_segment(aes(x=start_centered, xend=end_centered, y=width, yend=width), alpha = 0.3) +
+  geom_vline(xintercept = c(0), color="firebrick3") + 
+  theme_bw()+
+  ylab("Fragment Length")+
+  xlab("Distance to CTCF motif center")+
+  scale_x_continuous(
+    labels = comma_format(),
+    position = "top",
+    breaks = seq(-150,150,50),
+    sec.axis = sec_axis(~. + ctcf_loc,
+                        breaks = ctcf_loc+c(-100, 0,  100),
+                        labels = comma_format(),
+                        name = "chr1 position (bp)")) +
+  
+  scale_y_continuous(labels = comma_format(), limits=c(20,160),breaks = seq(40,150,40))+
+  #geom_vline(xintercept = c(-35,35), col = "firebrick3", linetype = "dashed")+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))
+
+p1
+```
+
+```{r}
+p2 <- locus_fragments %>% 
+  ggplot(aes(x = width))+
+  geom_histogram(fill = "darkblue",col = "royalblue")+
+  theme_bw()+
+    scale_x_continuous(labels = comma_format(), limits=c(20,160),breaks = seq(40,150,40))+
+      scale_y_continuous(labels = comma_format(),breaks = c(0,200,400))+
+  coord_flip()+
+   theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
+  xlab("")+
+  ylab("Count")+
+    theme(axis.text.y=element_blank(),
+      axis.ticks.y=element_blank())
+p2
+```
+
+```{r, fig.width = 7, fig.height = 3}
+plot_grid(plotlist = list(p1,p2), align = "hv", axis = "tblr", rel_widths = c(3,1))
+#ggsave(paste0(path,"4_fragment_occupied.png"), width=7, height=3)
+```
+### Low CTCF occupancy example (4A)
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+data.frame(chip_gr) %>% 
+  filter(seqnames == "chr1") %>% 
+  arrange(qval) 
+```
+
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+ctcf_motifs$motif_mid <- round( ( start(ctcf_motifs) + end(ctcf_motifs) )/2)
+ovl <- findOverlaps(ctcf_motifs, chip_gr, maxgap = 0)
+
+out <- as.data.frame(ctcf_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      chip_id = subjectHits(ovl),
+          chip_mid = chip_gr$peak_mid[subjectHits(ovl)],
+          chip_qval = chip_gr$qval[subjectHits(ovl)]) 
+
+out %>% 
+  mutate(dist = abs(motif_mid-chip_mid)) %>% 
+  filter(dist < 30) %>% 
+  arrange(chip_qval) %>% 
+  filter(seqnames =="chr1") %>% 
+  dplyr::slice(1)
+
+ctcf_loc <- (32352263	+32352281	)/2
+```
+
+
+```{r}
+motif <- ctcf_motifs %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(start, ctcf_loc - 200,	ctcf_loc + 200))
+motif
+```
+
+
+
+```{r,fig.width = 6, fig.height = 3}
+bw.plot <- BigwigTrack(
+  region =  GRanges("chr1", IRanges(ctcf_loc - 500,	ctcf_loc + 500)),
+  bigwig = list(" " = paste0(path,"K562_CTCF_signal_pval_ENCFF168IFW.bigWig")))
+
+bw.plot+
+   geom_vline(xintercept = ctcf_loc, col = "firebrick3") +
+  ylab("Coverage") +
+  scale_fill_manual(values=c("black"))+
+     theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
+     guides(fill = "none")+
+  scale_y_continuous(limits = c(0, 150))+
+  scale_x_continuous(
+    labels = comma_format(),
+    breaks = ctcf_loc+c(-450,  0,  450),
+    position = "top",
+    sec.axis = sec_axis(~. - ctcf_loc, name = "Distance to CTCF motif center",
+                                         breaks = c(-450,-300, -150, 0, 150, 300,450))) +
+  ylab("CTCF ChIP-seq Coverage")
+
+#ggsave(paste0(path,"4_chip_unoccupied.png"), width=6, height=3)
+```
+
+
+```{r}
+keep <- subsetByOverlaps(gr_fragment, motif, maxgap = 0, ignore.strand=TRUE) 
+
+locus_fragments <- as.data.frame(keep) %>% 
+  cbind(motif_mid = (start(motif)+end(motif))/2) %>% 
+  dplyr::mutate(
+    frag_id = dplyr::row_number(),
+    start_centered = start - motif_mid,
+    end_centered = end - motif_mid,
+    num_frags_at_motif = max(dplyr::row_number()),
+    downstream_frags = sum(end_centered>60),
+    upstream_frags = sum(start_centered<(-60)),
+    skew = log2((downstream_frags+1)/(upstream_frags+1)))
+```
+
+```{r}
+locus_fragments %>% 
+  filter(width < 120) %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  summarize(count = n()) %>% 
+  mutate(occupancy = 100*(count / nrow(locus_fragments)))
+```
+
+
+```{r,fig.width = 8, fig.height = 3}
+p1 <-locus_fragments%>% 
+  arrange(width) %>% 
+  mutate(frag_id = row_number()) %>% 
+  ggplot() + 
+  geom_point(aes(x = end_centered, y = width), col = "royalblue")+
+  geom_point(aes(x = start_centered, y = width), col = "royalblue")+
+  geom_segment(aes(x=start_centered, xend=end_centered, y=width, yend=width), alpha = 0.3) +
+  geom_vline(xintercept = c(0), color="firebrick3") + 
+  theme_bw()+
+  ylab("Fragment Length")+
+  xlab("Distance to CTCF motif center")+
+  scale_x_continuous(
+    labels = comma_format(),
+    position = "top",
+    breaks = seq(-150,150,50),
+    sec.axis = sec_axis(~. + ctcf_loc,
+                        breaks = ctcf_loc+c(-100, 0,  100),
+                        labels = comma_format(),
+                        name = "chr1 position (bp)")) +
+  
+  scale_y_continuous(labels = comma_format(), limits=c(20,160),breaks = seq(40,150,40))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))
+
+p1
+```
+
+```{r}
+p2 <- locus_fragments %>% 
+  ggplot(aes(x = width))+
+  geom_histogram(fill = "darkblue",col = "royalblue")+
+  theme_bw()+
+    scale_x_continuous(labels = comma_format(), limits=c(20,160),breaks = seq(40,150,40))+
+      scale_y_continuous(labels = comma_format(),breaks = c(0,50,100))+
+  coord_flip()+
+   theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
+  xlab("")+
+  ylab("Count")+
+    theme(axis.text.y=element_blank(),
+      axis.ticks.y=element_blank())
+p2
+```
+
+```{r, fig.width = 7, fig.height = 3}
+plot_grid(plotlist = list(p1,p2), align = "hv", axis = "tblr", rel_widths = c(3,1))
+#ggsave(paste0(path,"4_fragment_unoccupied.png"), width=7, height=3)
+```
+
+### Medium CTCF occupancy example (4A)
+
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+ctcf_motifs$motif_mid <- round( ( start(ctcf_motifs) + end(ctcf_motifs) )/2)
+# Remove overlapping motifs
+keep <- countOverlaps(ctcf_motifs, ctcf_motifs, ignore.strand=TRUE)==1 
+table(keep)
+ctcf_motifs <- ctcf_motifs[keep]
+```
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+data.frame(chip_gr) %>% 
+  filter(seqnames == "chr1") %>% 
+  arrange(qval) 
+```
+
+```{r}
+ovl <- findOverlaps(ctcf_motifs, chip_gr, maxgap = 0)
+
+out <- as.data.frame(ctcf_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      chip_id = subjectHits(ovl),
+          chip_mid = chip_gr$peak_mid[subjectHits(ovl)],
+          chip_qval = chip_gr$qval[subjectHits(ovl)]) 
+
+out <- out %>% 
+  mutate(dist = abs(motif_mid-chip_mid)) %>% 
+  filter(dist < 30) %>% 
+  arrange(chip_qval) %>% 
+  filter(seqnames =="chr1") %>% 
+  dplyr::select(seqnames, start,end,strand,motif_mid,dist,chip_qval)
+
+chip_motifs <- makeGRangesFromDataFrame(out,
+                                 seqnames.field="seqnames",
+                                 start.field="start",
+                                 end.field="end",
+                                 keep.extra.columns = TRUE)
+```
+
+```{r}
+ovl <- findOverlaps(gr_fragment, chip_motifs, maxgap = 0, ignore.strand=TRUE)
+
+fragments <- 
+    as.data.frame(gr_fragment[queryHits(ovl)]) %>% 
+    cbind(motif_id = subjectHits(ovl),
+          motif_mid = chip_motifs$motif_mid[subjectHits(ovl)],
+          motif_strand = strand(chip_motifs)[subjectHits(ovl)],
+          chip_signal = chip_motifs$chip_qval[subjectHits(ovl)],
+          chip_dist = chip_motifs$dist[subjectHits(ovl)]) %>% 
+    group_by(motif_id) %>% 
+    dplyr::mutate(
+      frag_id = dplyr::row_number(),
+           start_centered = start - motif_mid,
+           end_centered = end - motif_mid,
+           num_frags_at_motif = max(dplyr::row_number()),
+           downstream_frags = sum(end_centered>60),
+           upstream_frags = sum(start_centered<(-60)),
+           skew = log2((downstream_frags+1)/(upstream_frags+1)))
+
+# mid range occupancy
+fragments %>% 
+  filter(width < 120) %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  summarize(count = n(),
+            num_frags_at_motif = dplyr::first(num_frags_at_motif),
+            chr = dplyr::first(seqnames),
+            motif_mid = dplyr::first(motif_mid),
+            motif_strand = dplyr::first(motif_strand),
+            chip_signal = dplyr::first(chip_signal),
+            chip_dist = dplyr::first(chip_dist)) %>% 
+  mutate(occupancy = 100*(count / num_frags_at_motif)) %>% 
+  filter(num_frags_at_motif > 100) %>% 
+  filter(dplyr::between(occupancy,30,35))
+
+```
+
+*I'm picking the one w/ the higher number of fragments at the CTCF motif for the example, so we can see the trend better.*
+
+```{r}
+ctcf_loc <-2382784		
+motif <- ctcf_motifs %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(start, ctcf_loc - 25,	ctcf_loc + 25))
+motif
+```
+
+
+
+```{r,fig.width = 6, fig.height = 3}
+bw.plot <- BigwigTrack(
+  region =  GRanges("chr1", IRanges(ctcf_loc - 500,	ctcf_loc + 500)),
+  bigwig = list(" " = paste0(path,"K562_CTCF_signal_pval_ENCFF168IFW.bigWig")))
+
+bw.plot+
+   geom_vline(xintercept = ctcf_loc, col = "firebrick3") +
+  ylab("Coverage") +
+  scale_fill_manual(values=c("black"))+
+     theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
+   
+    guides(fill = "none")+
+  scale_y_continuous(limits = c(0, 150))+
+  scale_x_continuous(
+    labels = comma_format(),
+    breaks = ctcf_loc+c(-450,  0,  450),
+    position = "top",
+    sec.axis = sec_axis(~. - ctcf_loc, name = "Distance to CTCF motif center",
+                                         breaks = c(-450,-300, -150, 0, 150, 300,450))) +
+  ylab("CTCF ChIP-seq Coverage")
+
+#ggsave(paste0(path,"4_chip_midoccupied.png"), width=6, height=3)
+```
+
+```{r}
+keep <- subsetByOverlaps(gr_fragment, motif, maxgap = 0, ignore.strand=TRUE) 
+
+locus_fragments <- as.data.frame(keep) %>% 
+  cbind(motif_mid = (start(motif)+end(motif))/2) %>% 
+  dplyr::mutate(
+    frag_id = dplyr::row_number(),
+    start_centered = start - motif_mid,
+    end_centered = end - motif_mid,
+    num_frags_at_motif = max(dplyr::row_number()),
+    downstream_frags = sum(end_centered>60),
+    upstream_frags = sum(start_centered<(-60)),
+    skew = log2((downstream_frags+1)/(upstream_frags+1)))
+```
+
+```{r}
+locus_fragments %>% 
+  filter(width < 120) %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  summarize(count = n()) %>% 
+  mutate(occupancy = 100*(count / nrow(locus_fragments)))
+```
+
+
+```{r,fig.width = 5, fig.height = 2}
+p1 <-locus_fragments%>% 
+  arrange(width) %>% 
+  mutate(frag_id = row_number()) %>% 
+  ggplot() + 
+  geom_point(aes(x = end_centered, y = width), col = "royalblue")+
+  geom_point(aes(x = start_centered, y = width), col = "royalblue")+
+  geom_segment(aes(x=start_centered, xend=end_centered, y=width, yend=width), alpha = 0.3) +
+  geom_vline(xintercept = c(0), color="firebrick3") + 
+  theme_bw()+
+  ylab("Fragment Length")+
+  xlab("Distance to CTCF motif center")+
+  scale_x_continuous(
+    labels = comma_format(),
+    position = "top",
+    breaks = seq(-150,150,50),
+    sec.axis = sec_axis(~. + ctcf_loc,
+                        breaks = ctcf_loc+c(-100, 0,  100),
+                        labels = comma_format(),
+                        name = "chr1 position (bp)")) +
+  
+  scale_y_continuous(labels = comma_format(), limits=c(20,160),breaks = seq(40,150,40))+
+  #geom_vline(xintercept = c(-35,35), col = "firebrick3", linetype = "dashed")+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))
+
+p1
+```
+
+```{r}
+p2 <- locus_fragments %>% 
+  ggplot(aes(x = width))+
+  geom_histogram(fill = "darkblue",col = "royalblue")+
+  theme_bw()+
+    scale_x_continuous(labels = comma_format(), limits=c(20,160),breaks = seq(40,150,40))+
+      scale_y_continuous(labels = comma_format(),breaks = c(0,125,250))+
+  coord_flip()+
+   theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =16,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
+  xlab("")+
+  ylab("Count")+
+    theme(axis.text.y=element_blank(),
+      axis.ticks.y=element_blank())
+p2
+```
+
+```{r, fig.width = 7, fig.height = 3}
+plot_grid(plotlist = list(p1,p2), align = "hv", axis = "tblr", rel_widths = c(3,1))
+#ggsave(paste0(path,"4_fragment_midoccupied.png"), width=7, height=3)
+```
+
+### Estimate partially extruded state: Figure 5A
+
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+left_plus <- readRDS(file = paste0(path, "left_plus_annot_cluster.RDS"))
+
+left_plus<- left_plus %>% 
+   filter(start_centered < -15) %>% 
+   filter(end_centered > 15) %>% 
+  mutate(fragment_length = end_centered - start_centered) %>% 
+  filter(fragment_length<115) %>% 
+  mutate(interaction_length = abs(end2-start)) %>% 
+  filter(interaction_length>10000) %>% 
+  ungroup() %>% 
+  dplyr::rename(start1 = start, end1 = end)
+
+gr_fragment <- makeGRangesFromDataFrame(left_plus,
+                                 seqnames.field="seqnames",
+                                 start.field="start2",
+                                 end.field="end2", 
+                                 keep.extra.columns = TRUE)
+
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+minus_motifs <- ctcf_motifs[strand(ctcf_motifs)=="-"]
+
+keep <- subsetByOverlaps(gr_fragment, minus_motifs, maxgap = 0, ignore.strand=TRUE) 
+
+0.5* (length(keep) / length(gr_fragment)*100) # 4.5%
+
+left_plus$convergent = 0
+left_plus$convergent[left_plus$pair_ID %in% keep$pair_ID] <- 1
+#sum(left_plus$convergent == 1) / nrow(left_plus) * 100
+
+# left_plus %>% 
+#   group_by(motif_id) %>% 
+#   summarize(type = dplyr::first(type),
+#             active = dplyr::first(Active),
+#     num_convergent = sum(convergent),
+#             num_fragments = max(row_number())) %>% 
+#     mutate(perc_conv = num_convergent / num_fragments) %>% 
+#   filter(num_fragments > 50) %>% 
+#   summarize(q1 = quantile(perc_conv, probs = 0.25),
+#             q2 = quantile(perc_conv, probs = 0.5),
+#             q3 = quantile(perc_conv, probs = 0.75),
+#             avg = mean(perc_conv))
+
+```
+
+```{r}
+freq <- left_plus %>% 
+  group_by(motif_id) %>% 
+  summarize(type = dplyr::first(type),
+            num_convergent = sum(convergent),
+            num_fragments = max(row_number())) %>% 
+  mutate(perc_conv = 100*(num_convergent / num_fragments)) %>% 
+  filter(num_fragments>50) 
+freq
+#quantile(freq$perc_conv, seq(0,1,0.01))
+quantile(0.5*freq$perc_conv, c(0.01, 0.99))
+```
+
+
+```{r, fig.width = 6, fig.height = 5}
+left_plus %>% 
+  group_by(motif_id) %>% 
+  summarize(type = dplyr::first(type),
+            num_convergent = sum(convergent),
+            num_fragments = max(row_number())) %>% 
+  mutate(perc_conv = 0.5 * (100*(num_convergent / num_fragments))) %>% 
+  filter(num_fragments>50) %>% 
+  ggplot(aes(x = perc_conv))+
+  geom_histogram(aes(y = ..density..),
+                 colour = "black", fill = "white", binwidth = 1) +
+  geom_density(lwd = 1, colour = "royalblue",
+               fill = "royalblue", alpha = 0.25)+
+  scale_x_continuous(breaks = seq(0, 12, 5))+
+  theme_classic()+
+   theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold")) +
+  ylab("Density")+
+  xlab("Percent convergent")
+
+#ggsave(paste0(path,"perc_convergent.png"), width=6, height=5)
+```
+
+# FIGURE 2
+
+```{r}
+chr <- "chr1"
+pairs <- readRDS(paste0("/aryeelab/users/corri/data/CTCF_chr_pairs/k562_ctcf_",chr, ".RDS"))
+pairs_CTCF<- pairs
+```
+
+
+```{r}
+ctcf_gr <- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+```
+
+
+```{r}
+loops <-read_tsv("/aryeelab/users/corri/data/K562_CTCF_2.5kb.interactions_FitHiC_Q0.01.bed")
+loops <- loops %>% dplyr::filter(chr1=="chr1")
+loops <- loops %>% 
+  dplyr::arrange(`Q-Value_Bias`)
+```
+
+```{r}
+ctcf_gr %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(start, 30779762 - 500,	30779762 + 500))
+```
+
+### Figure 2A
+```{r}
+ctcf_loc <- (30779763	+30779781)/2
+#pairs_CTCF <- pairs
+pairs <- pairs_CTCF
+print("Index pairs")
+left_anchor <- pairs %>% 
+  dplyr::select(chr1, pos1, strand1) %>% 
+  rename(chr = chr1, pos = pos1, strand = strand1) 
+right_anchor <- pairs %>% 
+  dplyr::select(chr2, pos2, strand2) %>% 
+  rename(chr = chr2, pos = pos2, strand = strand2) 
+pairs_no_direction <- rbind(left_anchor, right_anchor)
+pairs <- pairs_no_direction
+
+
+r1_gr <- GRanges(pairs$chr, IRanges(pairs$pos, pairs$pos))
+
+width <- 1250
+left_anchor <- GRanges("chr1", IRanges(ctcf_loc - width, ctcf_loc + width))
+right_anchor <- GRanges("chr1", IRanges(ctcf_loc - width, ctcf_loc + width))
+
+idx2 <- queryHits(findOverlaps(r1_gr, right_anchor))
+```
+
+```{r, fig.width =8,fig.height = 4}
+ctcf_df <- ctcf_gr %>% subsetByOverlaps(c(left_anchor, right_anchor)) %>% as.data.frame() %>%
+  mutate(direction_symbol =  ifelse(strand=="+", ">", "<"),
+         y_adjust = ifelse(strand=="+", 1, 0.9))
+
+bin_size <- 5
+
+summ <- pairs[idx2,] %>% 
+  mutate(pos = round(pos/bin_size)*bin_size) %>%
+  group_by(pos, strand) %>%
+  summarize(n=n()) %>% mutate(n=n*ifelse(strand=="+", 1, -1))
+# Fill in zero reads for missing positions (i.e. those with no reads to summarize)
+x <- seq(start(right_anchor), end(right_anchor), bin_size)
+summ <- rbind(summ, 
+              data.frame(pos=x, strand="+", n=0), 
+              data.frame(pos=x, strand="-", n=0)) %>%
+  group_by(pos, strand) %>% 
+  summarize(n=sum(n))
+
+arrow_MNase_NO_filt <- -max(abs(summ$n))
+
+p1 <- summ %>%
+  mutate(pos = pos- ctcf_loc) %>% 
+  ggplot(aes(pos, n)) + geom_line(aes(color=strand), size=0.5) +
+  scale_x_continuous(labels = comma_format(), limits=c(-1250,1250),breaks = seq(-1000,1000,500)) +
+  scale_y_continuous(labels = comma_format(), limits=c( -max(abs(summ$n)), max(abs(summ$n))),
+                     breaks = seq(- 400,400,200)) +
+ annotate("text", x = 0, y = arrow_MNase_NO_filt, label = "<", color="black",family = "Times New Roman",size = 8,fontface =2) +
+   annotate("text", x = -1100, y = arrow_MNase_NO_filt, label = "CTCF",family = "Times New Roman",size = 5,fontface =2) +
+ annotate("text", x = -1100, y = 0.75*max(abs(summ$n)), label = "+ Reads", color="darkred",family = "Times New Roman",size = 5,fontface =2) +
+ annotate("text", x = -1100, y = -0.75*max(abs(summ$n)), label = "- Reads", color="darkblue",family = "Times New Roman",size = 5,fontface =2) +
+  scale_color_manual(values=c("+"="darkred", "-"="darkblue")) +
+  theme(legend.position = "none") +
+  ggtitle("All reads") +
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  xlab("Distance from CTCF Motif") +
+  theme(legend.position = "none")+
+  geom_vline(xintercept = 0, col = "magenta", linetype=2) +
+  geom_vline(xintercept = 0, col = "magenta", linetype = "dashed")
+
+p1
+#ggsave(paste0(path,"2A_all_fragments.png"), width=8, height=4)
+```
+
+### Figure 2C
+```{r}
+ctcf_loc <- (30779763	+30779781)/2
+pairs <- pairs_CTCF 
+print("Index pairs")
+
+left_anchor <- pairs %>% 
+      filter(type %in% c("uu", "uU", "UR")) %>% 
+      select(chr1, pos1, strand1, type) %>% 
+      rename(chr = chr1, pos = pos1, strand = strand1) 
+    
+right_anchor <- pairs %>% 
+      filter(type %in% c("uu", "Uu", "RU")) %>% 
+      select(chr2, pos2, strand2, type) %>% 
+      rename(chr = chr2, pos = pos2, strand = strand2) 
+
+pairs_no_direction <- rbind(left_anchor, right_anchor)
+pairs <- pairs_no_direction
+
+
+r1_gr <- GRanges(pairs$chr, IRanges(pairs$pos, pairs$pos))
+
+width <- 1250
+
+left_anchor <- GRanges("chr1", IRanges(ctcf_loc - width, ctcf_loc + width))
+right_anchor <- GRanges("chr1", IRanges(ctcf_loc - width, ctcf_loc + width))
+
+idx2 <- queryHits(findOverlaps(r1_gr, right_anchor))
+```
+
+
+```{r, fig.width = 8, fig.height = 4}
+ctcf_loc <- (30779763	+30779781)/2
+
+ctcf_df <- ctcf_gr %>% subsetByOverlaps(c(left_anchor, right_anchor)) %>% as.data.frame() %>%
+  mutate(direction_symbol =  ifelse(strand=="+", ">", "<"),
+         y_adjust = ifelse(strand=="+", 1, 0.9))
+
+bin_size <- 5
+
+summ <- pairs[idx2,] %>% 
+  mutate(pos = round(pos/bin_size)*bin_size) %>%
+  group_by(pos, strand) %>%
+  summarize(n=n()) %>% mutate(n=n*ifelse(strand=="+", 1, -1))
+# Fill in zero reads for missing positions (i.e. those with no reads to summarize)
+x <- seq(start(right_anchor), end(right_anchor), bin_size)
+summ <- rbind(summ, 
+              data.frame(pos=x, strand="+", n=0), 
+              data.frame(pos=x, strand="-", n=0)) %>%
+  group_by(pos, strand) %>% 
+  summarize(n=sum(n))
+arrow_MNase_filt <- -max(abs(summ$n))
+
+p2 <- summ %>%
+  mutate(pos = pos- ctcf_loc) %>% 
+  ggplot(aes(pos, n)) + geom_line(aes(color=strand), size=0.5) +
+  scale_x_continuous(labels = comma_format(), limits=c(-1250,1250),breaks = seq(-1000,1000,500)) +
+  scale_y_continuous(labels = comma_format(), limits=c( -max(abs(summ$n)), max(abs(summ$n))),
+                     breaks = seq(- 400,400,200)) +
+  annotate("text", x = 0, y = arrow_MNase_filt, label = "<", color="black",family = "Times New Roman",size = 8,fontface =2) +
+  annotate("text", x = -1100, y = arrow_MNase_filt, label = "CTCF",family = "Times New Roman",size = 5,fontface =2) +
+  annotate("text", x = -1100, y = 0.75*max(abs(summ$n)), label = "+ Reads", color="darkred",family = "Times New Roman",size = 5,fontface =2) +
+  annotate("text", x = -1100, y = -0.75*max(abs(summ$n)), label = "- Reads", color="darkblue",family = "Times New Roman",size = 5,fontface =2) +
+  
+  scale_color_manual(values=c("+"="darkred", "-"="darkblue")) +
+  ggtitle("Short fragments") +
+  xlab("Distance from CTCF Motif") +
+  geom_vline(xintercept = - 75, col = "black", linetype=2) +
+  geom_vline(xintercept = 75, col = "black", linetype=2) +
+  annotate("text",x = 300, y = -175, label = "150 bp", size=5, col = "black",family = "Times New Roman",fontface =2)+
+  annotate("segment", x=-75, xend=75, y = -175, yend=-175, colour = "black", arrow=arrow(ends='both',length = unit(0.2,"cm")))+
+  geom_vline(xintercept = 0, col = "magenta", linetype = "dashed")+
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  theme(legend.position = "none") 
+
+p2
+#ggsave(paste0(path,"2C_short_fragments.png"), width=8, height=4)
+```
+
+
+```{r}
+ctcf_loc <- (30779763	+30779781)/2
+
+r1_gr <- GRanges(pairs$chr, IRanges(pairs$pos, pairs$pos))
+
+right_anchor <- GRanges("chr1", IRanges(ctcf_loc - 200, ctcf_loc + 200))
+idx2 <- queryHits(findOverlaps(r1_gr, right_anchor))
+
+
+summ <- pairs[idx2,] %>%
+    mutate(pos2 = pos- ctcf_loc)
+  
+check <- density(summ$pos2[summ$strand == "+"])
+check_neg <- (density(summ$pos2[summ$strand == "-"]))
+
+# plot the results of the density call
+ctcf_150 <- ggplot(data.frame(x = check$x, y = check$y)) + 
+  aes(x = x, y = y) + 
+  geom_line(color = "darkred") +
+  geom_line(aes(x = check_neg$x, y = -1 * check_neg$y), color="darkblue") +
+  geom_vline(xintercept = 75, linetype = "dashed") +
+  geom_vline(xintercept = -75, linetype = "dashed") +
+  annotate("text", x = -180, y = -0.025, label = "CTCF",family = "Times New Roman",size = 5,fontface =2) +
+  annotate("text", x = -180, y = 0.015, label = "+ Reads", color="darkred",family = "Times New Roman",size = 5,fontface =2) +
+  annotate("text", x = -180, y = -0.015, label = "- Reads", color="darkblue",family = "Times New Roman",size = 5,fontface =2) +
+  xlab("Distance from CTCF Motif") +
+  ylab("Density") +
+  annotate("text", x = 0, y = -0.025, label = "<", color="black",family = "Times New Roman",size = 8,fontface =2) +
+  geom_hline(yintercept = 0, linetype=2) +
+  scale_x_continuous(labels = comma_format(), limits=c(-200,200),breaks = c(-150,-75,0,75,150)) +
+  
+  annotate("text",x = 60, y = 0.015, label = "Q1", size=5, col = "darkred",family = "Times New Roman",fontface =2) + 
+  annotate("text",x = -60, y = 0.015, label = "Q2", size=5, col = "darkred",family = "Times New Roman",fontface =2) + 
+  annotate("text",x = -60, y = -0.015, label = "Q3", size=5, col = "darkblue",family = "Times New Roman",fontface =2) + 
+  annotate("text",x = 60, y = -0.015, label = "Q4", size=5, col = "darkblue",family = "Times New Roman",fontface =2)  +
+  
+  annotate("text",x = -100, y = -0.005, label = "-75", size=5, col = "black",family = "Times New Roman",fontface =2)+
+  annotate("text",x = 100, y = -0.005, label = "+75", size=5, col = "black",family = "Times New Roman",fontface =2)+
+
+  annotate("text",x = 0, y = -0.034, label = "150 bp", size=5, col = "black",family = "Times New Roman",fontface =2)+
+  annotate("segment", x=-75, xend=75, y = -0.04, yend=-0.04, colour = "black", arrow=arrow(ends='both'),size = 2)+
+    ylim(c( -0.04, 0.04))+
+   theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+  
+ctcf_150
+```
+
+```{r}
+script_dir <- "/aryeelab/users/corri/code/mnase-hichip/code/"
+```
+
+
+```{r}
+ctcf_loc <- (30779763	+30779781)/2
+source(paste0(script_dir,"get_quadrants_function.R"))
+regions <- data.frame(chr1 = "chr1", s1 = ctcf_loc-width, e1 = ctcf_loc+width)
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+pval_table <- paste0(path, "df_p_1e8.RDS")
+
+reads <- get_quadrant_reads(regions = regions, step = 1, pairs = pairs_CTCF, num_cores=8, pval_table)
+```
+
+```{r}
+linecol <- "magenta"
+
+MM_plot <- reads%>% 
+  mutate(pos = window_mid- ctcf_loc) %>% 
+  ggplot(mapping = aes(x = pos, y = min_max)) +
+  scale_x_continuous(labels = comma_format(), limits=c(-200,200),breaks = c(-150,-75,0,75,150)) +
+    geom_point(col = "black", size = 0.5) +
+    # geom_vline(xintercept = 0, col = linecol, linetype = "dashed") +
+   theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  xlab("Distance from CTCF Motif ")+
+  ylab("min/max")  +
+  annotate("text", x = 0, y = 0, label = "<", color="black",family = "Times New Roman",size = 8,fontface =2) 
+MM_plot
+
+```
+
+
+```{r, fig.height = 8, fig.width= 8}
+linecol <-"magenta"
+plot_grid(plotlist=list(ctcf_150+
+                          geom_vline(xintercept = 0, col = linecol, linetype = "dashed"),
+                        MM_plot+
+                          geom_vline(xintercept = 0, col = linecol, linetype = "dashed")+
+                          geom_hline(yintercept = 1, col = "black")), 
+          ncol=1, align="hv", axis="tblr")
+
+#ggsave(paste0(path,"2E_G_density_pval.png"), width=8, height=8)
+
+```
+
+
+# FIGURE 3 (and some plots for figure 2)
+
+```{r}
+df_p <- readRDS(file = paste0(path, "df_p_1e8.RDS"))
+```
+
+min/max ratio by num_reads p-value grid:
+
+### Supplemental
+```{r, fig.width = 8, fig.height = 5}
+df_p %>% 
+  mutate(log_pval = -log10(p)) %>% 
+  ggplot(aes(num_reads, log_min_max, fill=log_pval)) + 
+  geom_tile() +
+   scale_fill_viridis(option = "mako")+
+  ylab("log2 (min/max)")  +
+  xlab("Read Count")+
+  labs(fill = "-log10(p-value)")+
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+  
+#ggsave(paste0(path,"S_min_max_reads.png"), width=8, height=5)
+```
+
+Which log(min/max) value to choose for a given p-value cutoff?
+
+### Supplemental
+```{r}
+df_p %>% 
+  filter(p != 0) %>% 
+  mutate(log_p = -log10(p)) %>% 
+  filter(num_reads %in% c(10, 25, 50,100,200,300,400, 450,500)) %>% 
+  mutate(num_reads=factor(num_reads)) %>% 
+  ggplot(aes(-log10(p), log_min_max, group=num_reads, color=num_reads)) + 
+  geom_line() + 
+  scale_color_viridis_d(option = "mako")+
+  ylim(0,3)+
+  ylab("log2 (min/max)")  +
+  xlab("-log10(p-value)")+
+  labs(color = "Read Count")+
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+  
+  
+    
+#ggsave(paste0(path,"S_min_max_reads_factor.png"), width=8, height=5)
+```
+
+# Get true positive / true negative set for genomewide pvals
+
+```{r}
+loops <-read_tsv("/aryeelab/users/corri/data/K562_CTCF_2.5kb.interactions_FitHiC_Q0.01.bed")
+loops <- loops %>% 
+  filter(chr1 != "chrX") %>% 
+  filter(chr2 != "chrX")
+
+LA <- loops %>% 
+  dplyr::select(chr1, s1, e1) %>% 
+  dplyr::rename(chr = chr1, start = s1, end = e1)
+
+RA <- loops %>% 
+  dplyr::select(chr2, s2, e2) %>% 
+  dplyr::rename(chr = chr2, start = s2, end = e2)
+
+anchors <- rbind(LA,RA) %>% 
+  mutate(loc = paste0(chr, ":",start)) %>% 
+  distinct(loc, .keep_all = TRUE)
+
+anchors_gr <- makeGRangesFromDataFrame(anchors, 
+                                     keep.extra.columns = TRUE,
+                                     seqnames.field = "chr",
+                                     start.field = "start",
+                                     end.field = "end")
+```
+
+```{r}
+ctcf_motifs<- readRDS("/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+gr_motifs$motif_mid <- round( ( start(gr_motifs) + end(gr_motifs) )/2)
+```
+
+### Figure 3D
+```{r}
+ovl <- findOverlaps(gr_motifs, anchors_gr, maxgap = 0)
+
+out <- as.data.frame(gr_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      loop_id = subjectHits(ovl),
+          loop_start = start(anchors_gr)[subjectHits(ovl)],
+          loop_end = end(anchors_gr)[subjectHits(ovl)]) 
+out %>% 
+  group_by(loop_id) %>% 
+  dplyr::summarize(count =dplyr::n()) %>%
+  filter(count < 10) %>% 
+  ggplot(aes(x = count))+
+  geom_histogram(fill = "darkblue", col = "white")+
+  
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  xlab("Number of CTCF motifs per 2.5kb loop anchor")+
+  ylab("Count") +
+  scale_x_continuous(breaks=seq(1:10))
+
+#ggsave(paste0(path,"3C_loop_hist.png"), width=8, height=5)
+```
+
+
+```{r}
+temp<- out %>% 
+  group_by(loop_id) %>% 
+  dplyr::summarize(count =dplyr::n()) 
+
+# 70% have more than one CTCF motif
+temp %>% 
+  filter(count >1) %>% 
+  dplyr::summarize(RN = max(row_number())) %>% 
+  mutate(freq = RN / nrow(temp))
+```
+
+
+### loop anchors with only one CTCF motif 
+```{r}
+uniq<- out %>% 
+  dplyr::group_by(loop_id) %>% 
+  dplyr::mutate(count = max(dplyr::row_number())) %>% 
+  ungroup() %>% 
+  filter(count == 1) %>% 
+  arrange(loop_id)
+
+uniq_gr <- makeGRangesFromDataFrame(uniq, 
+                                     keep.extra.columns = FALSE,
+                                     seqnames.field = "seqnames",
+                                     start.field = "start",
+                                     end.field = "end")
+uniq_gr$motif_mid <- uniq$motif_mid
+uniq_gr$loop_start <- uniq$loop_start
+uniq_gr$loop_end <- uniq$loop_end
+```
+
+
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+anchors <- chip_gr %>% 
+  plyranges::anchor_center() %>% 
+  plyranges::mutate(width = 301)
+
+min(width(anchors))
+max(width(anchors))
+```
+
+
+```{r}
+ovl <- findOverlaps(uniq_gr, anchors, maxgap = 0)
+
+out <- as.data.frame(uniq_gr[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      chip_id = subjectHits(ovl),
+          chip_start = start(anchors)[subjectHits(ovl)],
+          chip_mid = anchors$peak_mid[subjectHits(ovl)],
+          chip_end = end(anchors)[subjectHits(ovl)],
+          qval_score = anchors$qval[subjectHits(ovl)]) %>% 
+  mutate(dist = chip_mid - motif_mid)
+
+out <- out %>% 
+  ungroup() %>% 
+  group_by(chip_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+out <- out %>% 
+  filter(abs(dist) < 30)
+
+ctcf_chip <- out %>% 
+  ungroup()
+```
+
+
+```{r}
+# version to make the heatmap plots
+loop_anc <- out %>%
+  ungroup() %>% 
+  dplyr::select(seqnames, motif_mid) %>%
+  mutate(chr1 = seqnames,
+         s1 = motif_mid - 100,
+         e1 = motif_mid + 100)
+nrow(loop_anc)
+```
+
+```{r}
+pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs_STRAND_TYPE_X.rds")
+pairs <- pairs %>% 
+  filter(chr1 != "chrX") # 386,874,029 rows
+nrow(pairs)
+```
+
+*took 5 minutes*
+```{r}
+source("/aryeelab/users/corri/code/mnase-hichip/code/get_quadrants_function.R")
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+pval_table <- paste0(path, "df_p_1e8.RDS")
+reads <- get_quadrant_reads(regions = loop_anc, step = 1, pairs = pairs, num_cores=8,pval_table)
+```
+
+```{r}
+results_anc1 <- reads
+
+results_anc1<- results_anc1 %>% 
+  mutate(dist = window_mid - motif_mid)
+
+order <- results_anc1 %>% 
+  ungroup() %>% 
+  dplyr::group_by(region_id) %>%
+  dplyr::summarize(max_signal = max(log_min_max),
+                   signal = sum(log_min_max)) %>% 
+  arrange(desc(max_signal), desc(signal)) %>% 
+  dplyr::mutate(order = 1:nrow(loop_anc)) # 4523
+  
+results_anc1<- left_join(results_anc1,order, by = "region_id")
+```
+
+```{r}
+saveRDS(results_anc1, file = paste0(path,"heatmap_sort_readcounts.RDS"))
+```
+
+### start here
+
+### Figure 3A
+```{r, fig.width = 8, fig.height = 4}
+results_anc1 <- readRDS(file = paste0(path,"heatmap_sort_readcounts.RDS"))
+
+results_anc1$log_min_max_thresh <- results_anc1$log_min_max
+results_anc1$log_min_max_thresh[results_anc1$log_min_max_thresh > 3] <- 3
+results_anc1$log_min_max_thresh[results_anc1$log_min_max_thresh < -3] <- -3
+max(results_anc1$log_min_max_thresh)
+min(results_anc1$log_min_max_thresh)
+
+results_anc1 %>% 
+  ggplot(aes(dist, order, fill=log_min_max_thresh )) + 
+  geom_tile() +
+  ylab("log2 (min/max)")  +
+  xlab("Distance from CTCF Motif")+
+  labs(fill = "log2 (min/max)")+
+  
+   theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+   scale_fill_gradient2(
+    low = "darkblue",
+    mid = "white",
+    high = "darkred")+
+#  scale_colour_discrete_diverging(palette ="BrBG")
+  geom_vline(xintercept = c(0))+
+  scale_x_continuous(breaks=seq(-100,100,20))
+
+#ggsave(paste0(path,"3A_min_max_heatmap.png"), width=8, height=4)
+```
+
+
+### precision recall curves
+NOTE: use the loop anchors with one motif (first make sure the chip-seq peak agrees with the motif to get the "true set".)
+
+
+```{r}
+df <- readRDS(file =paste0(path, "GW_pvals.RDS"))
+
+
+peaks_gr <- makeGRangesFromDataFrame(df,
+                                     seqnames.field = "chr",
+                                     start.field = "window_mid",
+                                     end.field = "window_mid",
+                                     keep.extra.columns = TRUE)
+peaks_gr$FF_pval <- df$pvalue
+peaks_gr$window_mid <- df$window_mid
+```
+
+```{r}
+nrow(ctcf_chip) # 4523
+```
+
+
+```{r}
+chip_motif <- makeGRangesFromDataFrame(ctcf_chip,
+                                     seqnames.field = "seqnames",
+                                     start.field = "motif_mid",
+                                     end.field = "motif_mid")
+
+#length(chip_motif)
+
+ovl <- findOverlaps(chip_motif, peaks_gr, maxgap = 40)
+
+TP <- as.data.frame(chip_motif[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      peak_id = subjectHits(ovl),
+      peak = start(peaks_gr)[subjectHits(ovl)],
+        FF_pval = peaks_gr$FF_pval[subjectHits(ovl)],
+      q1 = peaks_gr$q1[subjectHits(ovl)],
+      q2 = peaks_gr$q2[subjectHits(ovl)],
+      q3 = peaks_gr$q3[subjectHits(ovl)],
+      q4 = peaks_gr$q4[subjectHits(ovl)],
+      num_reads = peaks_gr$num_reads[subjectHits(ovl)],
+      min24 = peaks_gr$min24[subjectHits(ovl)],
+      max13 = peaks_gr$max13[subjectHits(ovl)],
+      log_min_max = peaks_gr$log_min_max[subjectHits(ovl)]) %>% 
+  mutate(dist = start-peak) %>% 
+  group_by(motif_id) %>% 
+  filter(abs(dist) < 30) %>% 
+  arrange(desc(log_min_max)) %>% 
+  dplyr::slice(1) %>% 
+  ungroup()
+
+# maximum one peak per motif, because I've filtered to loop anchors with one motif
+# TP %>% 
+#   group_by(peak_id) %>% 
+#   summarize(count = n()) %>% 
+#   arrange(desc(count))
+```
+
+```{r}
+out <- ctcf_chip
+
+out <- out %>% 
+  mutate(s1 = loop_start+20,
+         e1 = motif_mid - 200, 
+         s2 = motif_mid + 200,
+         e2 = loop_end-20) 
+
+check <- out %>% 
+  filter(s1<e1)
+chip_motif1 <- makeGRangesFromDataFrame(check,
+                                     seqnames.field = "seqnames",
+                                     start.field = "s1",
+                                     end.field = "e1")
+
+check <- out %>% 
+  filter(s2<e2)
+chip_motif2 <- makeGRangesFromDataFrame(check,
+                                     seqnames.field = "seqnames",
+                                     start.field = "s2",
+                                     end.field = "e2")
+
+chip_motif<- c(chip_motif1, chip_motif2)
+
+ovl <- findOverlaps(chip_motif, peaks_gr, maxgap = 0)
+
+FP <- as.data.frame(chip_motif[queryHits(ovl)]) %>% 
+  cbind(loop_id = queryHits(ovl),
+      peak_id = subjectHits(ovl),
+          peak = start(peaks_gr)[subjectHits(ovl)],
+          FF_pval = peaks_gr$FF_pval[subjectHits(ovl)],
+      q1 = peaks_gr$q1[subjectHits(ovl)],
+      q2 = peaks_gr$q2[subjectHits(ovl)],
+      q3 = peaks_gr$q3[subjectHits(ovl)],
+      q4 = peaks_gr$q4[subjectHits(ovl)],
+      num_reads = peaks_gr$num_reads[subjectHits(ovl)],
+      min24 = peaks_gr$min24[subjectHits(ovl)],
+      max13 = peaks_gr$max13[subjectHits(ovl)],
+      log_min_max = peaks_gr$log_min_max[subjectHits(ovl)])
+  
+```
+
+
+```{r}
+FP$group <- floor(FP$peak/150)
+FP <- FP %>% 
+  mutate(group = paste0(seqnames, ":", group)) 
+
+num_TP<- 4523 # number of TP motifs
+
+thresh_vec <- seq(1,10, by = 1)
+
+
+PR <- data.frame(thresh=  thresh_vec, 
+                 lik_precision = rep(NA, length(thresh_vec)),
+                 lik_recall = rep(NA, length(thresh_vec)))
+
+iter <- 1
+for (score_val in thresh_vec){
+  print(score_val)
+
+  thresh <- 10^(-1 * score_val)
+  
+  ### False positives
+   num_FP_lik <- FP %>% 
+    filter(FF_pval<= thresh) %>%
+    group_by(group) %>%
+    dplyr::slice(1) %>%
+    ungroup() %>% 
+    dplyr::summarize(FP = max(dplyr::row_number())) %>% 
+    pull(FP) 
+  
+  if(num_FP_lik == "-Inf"){
+    num_FP_lik <- 0
+  }
+  
+  ### True positives
+  lik_TP <- TP %>%
+    filter(FF_pval <= thresh) %>% 
+    dplyr::summarize(truepos = max(dplyr::row_number())) %>% 
+    pull(truepos)
+  
+  # recall
+  PR$lik_recall[iter] <- lik_recall <- lik_TP /num_TP
+  
+  # precision
+  PR$lik_precision[iter] <- lik_prec <- lik_TP / (lik_TP + num_FP_lik)
+  iter <- iter + 1
+}
+
+PR
+```
+### Figure 3C
+```{r, fig.width = 8,fig.height = 4}
+library(ggrepel)
+PR %>% 
+  filter(thresh <= 8) %>% 
+  ggplot(aes(x = lik_recall, y = lik_precision)) +
+  geom_line(color = "royalblue", size = 1.5) +
+  geom_point(color = "darkblue", size = 2) +
+  geom_text_repel(aes(x = lik_recall, y = lik_precision, label = 10^(-1*thresh)),family = "Times New Roman",size = 5,fontface =2)+
+  geom_hline(yintercept = 1, col = "firebrick3", linetype = "dashed") + 
+  xlab("Recall") +
+  ylab("Precision") +
+  scale_x_continuous(breaks = c(seq(0.8,1,0.02)))+
+  scale_y_continuous(breaks = c(seq(0.2,1,0.1)))+
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+
+
+#ggsave(paste0(path,"3B_PR.png"), width=8, height=4)
+```
+
+### get unfiltered true negatives
+The genomewide results are filtered to min/max > 1 and read count > 5, so a lot of the null signal isn't included. 
+These clearly won't be false positives, but I need all the true negatives to make the boxplots.
+
+```{r}
+#version to get true negatives
+out <- ctcf_chip
+loop_anc <- out %>%
+  dplyr::select(seqnames, loop_start, loop_end) %>%
+  mutate(chr1 = seqnames,
+         s1 = loop_start - 100,
+         e1 = loop_end + 100)
+```
+
+```{r}
+#should still have pairs read in
+#pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs_STRAND_TYPE_X.rds")
+nrow(pairs)
+nrow(loop_anc)
+```
+
+doing 150bp step so it's not overlapping
+```{r}
+source("/aryeelab/users/corri/code/mnase-hichip/code/get_quadrants_function.R")
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+pval_table <- paste0(path, "df_p_1e8.RDS")
+reads <- get_quadrant_reads(regions = loop_anc, step = 150, pairs = pairs, num_cores=8,pval_table)
+```
+
+
+```{r}
+saveRDS(reads, file = paste0(path,"true_negative.RDS"))
+```
+
+```{r}
+reads <- readRDS(file = paste0(path,"true_negative.RDS"))
+```
+
+
+```{r}
+results<- reads %>% 
+  dplyr::select(-c(seqnames))
+peaks_gr <- makeGRangesFromDataFrame(results,
+                                     seqnames.field = "chr",
+                                     start.field = "window_mid",
+                                     end.field = "window_mid",
+                                     keep.extra.columns = TRUE)
+```
+
+
+```{r}
+out <- ctcf_chip
+
+out <- out %>% 
+  mutate(s1 = loop_start+20,
+         e1 = motif_mid - 200, 
+         s2 = motif_mid + 200,
+         e2 = loop_end-20) 
+
+check <- out %>% 
+  filter(s1<e1)
+chip_motif1 <- makeGRangesFromDataFrame(check,
+                                     seqnames.field = "seqnames",
+                                     start.field = "s1",
+                                     end.field = "e1")
+
+check <- out %>% 
+  filter(s2<e2)
+chip_motif2 <- makeGRangesFromDataFrame(check,
+                                     seqnames.field = "seqnames",
+                                     start.field = "s2",
+                                     end.field = "e2")
+
+chip_motif<- c(chip_motif1, chip_motif2)
+
+ovl <- findOverlaps(chip_motif, peaks_gr, maxgap = 0)
+
+FP <- as.data.frame(chip_motif[queryHits(ovl)]) %>% 
+  cbind(loop_id = queryHits(ovl),
+      peak_id = subjectHits(ovl),
+          peak = start(peaks_gr)[subjectHits(ovl)],
+          FF_pval = peaks_gr$pvalue[subjectHits(ovl)],
+      q1 = peaks_gr$q1[subjectHits(ovl)],
+      q2 = peaks_gr$q2[subjectHits(ovl)],
+      q3 = peaks_gr$q3[subjectHits(ovl)],
+      q4 = peaks_gr$q4[subjectHits(ovl)],
+      num_reads = peaks_gr$num_reads[subjectHits(ovl)],
+      min24 = peaks_gr$min24[subjectHits(ovl)],
+      max13 = peaks_gr$max13[subjectHits(ovl)],
+      log_min_max = peaks_gr$log_min_max[subjectHits(ovl)])
+```
+
+
+
+```{r}
+dist_TP <- TP %>% 
+  group_by(motif_id) %>% 
+  mutate(tot_reads =  q1+q2+q3+q4) %>% 
+  mutate(Q2 = q2 / tot_reads) %>% 
+  mutate(Q4 = q4 / tot_reads) %>% 
+  mutate(Q1 = q1  / tot_reads) %>% 
+  mutate(Q3 = q3 / tot_reads) %>% 
+  mutate(TP = "True Positive")
+
+
+TP_annot <- dist_TP %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Q2,Q4, Q1,Q3))
+
+dist_FP <- FP %>%  
+  ungroup() %>% 
+  group_by(peak_id) %>% 
+  mutate(tot_reads =  q1+q2+q3+q4) %>% 
+  mutate(Q2 = q2 / tot_reads) %>% 
+  mutate(Q4 = q4 / tot_reads) %>% 
+  mutate(Q1 = q1  / tot_reads) %>% 
+  mutate(Q3 = q3 / tot_reads) %>% 
+  mutate(TP = "True Negative")
+
+FP_annot <- dist_FP %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c(Q2,Q4, Q1,Q3))
+
+TP_annot<- TP_annot %>% 
+  dplyr::select(value,name,TP)
+FP_annot<- FP_annot %>% 
+  dplyr::select(value,name,TP)
+
+annot <- rbind(TP_annot,FP_annot)
+```
+
+### Figure 2E
+```{r, fig.width = 8, fig.height = 4}
+annot %>% 
+ ggplot(aes(y = name, 
+            x = value, 
+            fill = name,
+            col = name)) +
+   geom_boxplot(width = 0.4)+
+    scale_fill_manual(values = c("darkred", "firebrick3", "darkblue","royalblue")) +
+  scale_color_manual(values = c("firebrick3", "darkred", "royalblue","darkblue")) +
+  geom_vline(xintercept = 0.25, linetype = "dashed")+
+  xlab("Quadrant Read Frequency")+
+  ylab("")+
+  labs(fill = "Quadrant")+
+  facet_wrap(~TP,  ncol = 1) +
+  guides(col = "none")+
+  
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  scale_x_continuous(breaks = seq(0,1,0.2))+
+  theme(legend.position = "none")
+
+#ggsave(paste0(path, "2F_Dist.png"), width=8, height=4)
+```
+
+### Figure 3B
+```{r, fig.width = 8, fig.height = 4}
+FP_temp <- dist_FP %>% 
+  ungroup() %>% 
+  dplyr::select(TP, log_min_max)
+
+TP_temp <- dist_TP %>% 
+  ungroup() %>% 
+  dplyr::select(TP, log_min_max)
+
+
+rbind(FP_temp,TP_temp) %>% 
+  ggplot(aes(x = log_min_max, fill = as.factor(TP), col = as.factor(TP)))+
+  #geom_histogram()+
+  geom_density(alpha = 0.75) +
+  scale_fill_manual(values=c("darkblue", "darkred")) +
+  scale_color_manual(values=c("royalblue","firebrick3")) +
+  xlab("log2(min/max)")+
+  ylab("Density")+
+  labs(fill = "")+
+  guides(col = "none")+
+  geom_vline(xintercept = log2(1.6), linetype = "dashed")+
+  scale_x_continuous(breaks=seq(-5,5,1), limits = c(-5,5)) +
+  
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  theme(legend.position = "none")
+
+#ggsave(paste0(path,"3D_stat_density.png"), width=8, height=4)
+```
+
+
+# Motif occurrence + resolution
+
+```{r}
+ctcf_motifs<- readRDS("/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+gr_motifs$motif_mid <- round( ( start(gr_motifs) + end(gr_motifs) )/2)
+```
+
+
+```{r}
+all_peaks <- readRDS(paste0(path, "GW_peaks_1e-05.RDS"))
+all_peaks <- all_peaks %>% 
+  dplyr::rename(window_mid = start) %>% 
+  dplyr::select(-end)
+
+peaks_gr <- makeGRangesFromDataFrame(all_peaks, 
+                                     keep.extra.columns=TRUE,
+                                     seqnames.field = "seqnames",
+                                     start.field = "peak_summit", 
+                                     end.field = "peak_summit")
+
+peaks_gr$peak_mid <- start(peaks_gr)
+
+anchors <- peaks_gr %>% 
+  plyranges::anchor_center() %>% 
+  plyranges::mutate(width = 301)
+#max(anchors$qval)
+
+```
+
+
+```{r}
+ovl <- findOverlaps(gr_motifs, anchors, maxgap = 0)
+
+out <- as.data.frame(gr_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      pval_id = subjectHits(ovl),
+          pval_start = start(anchors)[subjectHits(ovl)],
+          pval_mid = anchors$peak_mid[subjectHits(ovl)],
+          pval_end = end(anchors)[subjectHits(ovl)],
+          pval_score = anchors$pvalue[subjectHits(ovl)],
+          qval_score = anchors$qval[subjectHits(ovl)]) %>% 
+  mutate(dist = pval_mid - motif_mid)
+
+out <- out %>% 
+  ungroup() %>% 
+  group_by(pval_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+out <- out %>% 
+  filter(abs(dist) < 150)
+
+```
+
+### Figure 3E
+```{r, fig.width = 8, fig.height = 5}
+out %>% 
+  ggplot(aes(x = dist)) +
+  geom_histogram(binwidth = 1, col = "black") +
+  geom_vline(xintercept = c(-20,0,20), col = "firebrick3", linetype = "dashed") +
+  xlab("Distance to Nearest CTCF Motif (bp)")+
+  ylab("Count")+
+  scale_x_continuous(breaks=seq(-150,150,30), limits = c(-150,150)) +
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+
+#ggsave(paste0(path,"3_FF_resolution.png"), width=8, height=5)
+```
+
+```{r}
+median(abs(out$dist)) # median distance of 5bp
+```
+
+
+
+```{r}
+chip_results <- out
+#num <- nrow(chip_results)
+
+num_peaks <- c(seq(1000, nrow(chip_results),  1000), nrow(chip_results))
+
+output <- data.frame(num_peaks = num_peaks, motif_occurrence = rep(NA, length(num_peaks)), resolution = rep(NA, length(num_peaks)))
+
+iter <- 1
+for(num in num_peaks ){
+  print(num)
+  temp <- chip_results %>% 
+    arrange(pval_score) %>% 
+    head(num)
+  
+  output$motif_occurrence[iter] <- motif_occurrence <- sum(abs(temp$dist) < 20) / num
+  output$resolution[iter] <- resolution <- mean(abs(temp$dist))
+  
+  #print(paste0("Motif occurrence ", round(motif_occurrence, 3)))
+  
+  #print(paste0("Resolution ", round(resolution, 4)))
+  iter <- iter + 1
+}
+```
+
+```{r}
+output
+```
+
+
+```{r}
+FF_results <- out
+FF_resolution <- output
+```
+# ChIP-seq resolution
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+anchors <- chip_gr %>% 
+  plyranges::anchor_center() %>% 
+  plyranges::mutate(width = 301)
+
+max(width(anchors))
+```
+
+
+```{r}
+ovl <- findOverlaps(gr_motifs, anchors, maxgap = 0)
+
+out <- as.data.frame(gr_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      pval_id = subjectHits(ovl),
+          pval_start = start(anchors)[subjectHits(ovl)],
+          pval_mid = anchors$peak_mid[subjectHits(ovl)],
+          pval_end = end(anchors)[subjectHits(ovl)],
+          qval_score = anchors$qval[subjectHits(ovl)]) %>% 
+  mutate(dist = pval_mid - motif_mid)
+
+out <- out %>% 
+  ungroup() %>% 
+  group_by(pval_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+out <- out %>% 
+  filter(abs(dist) < 150)
+```
+
+```{r}
+chip_results <- out
+
+#num <- nrow(chip_results)
+
+num_peaks <- c(seq(1000, nrow(chip_results),  1000), nrow(chip_results))
+
+output <- data.frame(num_peaks = num_peaks, motif_occurrence = rep(NA, length(num_peaks)), resolution = rep(NA, length(num_peaks)))
+
+iter <- 1
+for(num in num_peaks ){
+  print(num)
+  temp <- chip_results %>% 
+    arrange(desc(qval_score)) %>% 
+    head(num)
+  
+  output$motif_occurrence[iter] <- motif_occurrence <- sum(abs(temp$dist) < 20) / num
+  output$resolution[iter] <- resolution <- mean(abs(temp$dist))
+  
+#  print(paste0("Motif occurrence ", round(motif_occurrence, 3)))
+  
+ # print(paste0("Resolution ", round(resolution, 4)))
+  iter <- iter + 1
+}
+```
+
+```{r}
+colors <- c("Factor Finder" = "firebrick3","ChIP-seq" = "royalblue")
+motif_occurrence<- output %>% 
+  ggplot(aes(x = num_peaks, y = 100*motif_occurrence)) +
+  geom_point(aes(color = "ChIP-seq"))+
+  geom_line(aes(color = "ChIP-seq"))+
+  geom_point(data = FF_resolution, aes(x = num_peaks, y = 100*motif_occurrence, col =  "Factor Finder"))+
+  geom_line(data = FF_resolution, aes(x = num_peaks, y = 100*motif_occurrence, col =  "Factor Finder")) +
+  scale_color_manual(values = colors)+
+  geom_hline(yintercept = 95, col = "black", linetype = "dashed") +
+  scale_fill_manual(values = colors) +
+  xlab("Number of CTCF binding sites")+
+  ylab("Motif Occurrence (%)") +
+  ggtitle("Motif occurrence in peak centers") +
+    labs(col = "Method")+
+  xlim(c(0,30000))+
+  
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))
+
+motif_occurrence
+
+```
+
+
+### PWM
+
+*meme installation*
+```{bash, eval = FALSE}
+# As of December 2021, version 5.4.1 is the most recent MEME-Suite version
+# Please check the install guide (linked above) for more recent information
+#version=5.4.1
+#wget http://meme-suite.org/meme-software/$version/meme-$version.tar.gz
+#tar zxf meme-$version.tar.gz
+#cd meme-$version
+#./configure --prefix=$HOME/meme --with-url=http://meme-suite.org/ --enable-build-libxml2 --enable-build-libxslt
+#make
+#make test
+#make install
+```
+ 
+```{r}
+#BiocManager::install("memes")
+library(memes)
+check_meme_install()
+hg38.genome <- BSgenome.Hsapiens.UCSC.hg38::BSgenome.Hsapiens.UCSC.hg38
+all_peaks <- readRDS(paste0(path, "GW_peaks_1e-05.RDS"))
+all_peaks <- all_peaks %>% 
+  dplyr::rename(window_mid = start) %>% 
+  dplyr::select(-end)
+
+peaks_gr <- makeGRangesFromDataFrame(all_peaks, 
+                                     keep.extra.columns=TRUE,
+                                     seqnames.field = "seqnames",
+                                     start.field = "peak_summit", 
+                                     end.field = "peak_summit")
+
+peaks_gr$peak_mid <- start(peaks_gr)
+
+summit_flank <- peaks_gr %>%
+  plyranges::anchor_center() %>%
+  plyranges::mutate(width = 30)
+# Get sequences in peaks as Biostring::BStringSet
+sequences <- summit_flank %>% 
+  get_sequence(hg38.genome)
+```
+
+https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1008991#pcbi-1008991-t001
+
+*We use STREME instead of DREME because DREME produces sequences that are a maximum of 8bp long, which is too short.*
+```{r}
+STREME_out <- runStreme(sequences,  control = "shuffle",nmotifs = 1)
+
+library(universalmotif)
+PWM <- STREME_out %>% 
+  to_list() %>% 
+  view_motifs()
+
+PWM <- PWM + 
+  #ggtitle("De Novo Motif")+
+    theme(plot.title = element_text(size = 16, face = "bold",family = "Times New Roman"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),  
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        legend.position = "none") 
+```
+
+
+```{r}
+jaspar_ctcf <- read_meme("/aryeelab/users/corri/data/MA0139.1.meme")
+core_jaspar <- subset(jaspar_ctcf, 4:16)
+```
+
+
+
+```{r}
+PWM <- STREME_out %>% 
+  to_list()
+#jaspar_ctcf <- read_meme("/aryeelab/users/corri/data/MA0139.1.meme")
+
+motifs_plot <- view_motifs(list(PWM,core_jaspar), show.names = TRUE, dedup.names = TRUE)+
+   theme_classic()+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_blank())+
+  theme(legend.position = "none")
+```
+
+
+### Figure 3F, G
+```{r, fig.width = 8, fig.height = 8}
+plot_grid(plotlist = list(motif_occurrence+
+                             theme(legend.position="none"),
+                          motifs_plot), 
+          align = "hv", axis = "tblr", ncol = 1,
+          rel_heights = c(3,4))
+
+#ggsave(paste0(path, "3F_Motif_Occurrence.png"), width=8, height=8)
+```
+
+
+
+
+# FIGURE 4
+
+### RAD21 ChIP-seq
+
+```{bash, eval = FALSE}
+cd /aryeelab/users/corri/data/
+#CRISPR
+#https://www.encodeproject.org/experiments/ENCSR942XQI/
+wget https://www.encodeproject.org/files/ENCFF330SHG/@@download/ENCFF330SHG.bed.gz
+gunzip ENCFF330SHG.bed.gz
+mv ENCFF330SHG.bed K562_RAD21_ChIP_ENCFF330SHG.bed
+
+#NORMAL
+#https://www.encodeproject.org/experiments/ENCSR000BKV/
+wget https://www.encodeproject.org/files/ENCFF930WPG/@@download/ENCFF930WPG.bed.gz
+gunzip ENCFF930WPG.bed.gz
+mv ENCFF930WPG.bed K562_RAD21_ChIP_ENCFF930WPG.bed
+```
+
+```{r, fig.width = 8, fig.height = 4}
+left_plus <- readRDS(file = paste0(path, "left_plus_annot.RDS"))
+
+peaks <- read_tsv("/aryeelab/users/corri/data/K562_RAD21_ChIP_ENCFF330SHG.bed", col_names = FALSE)
+colnames(peaks) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+peaks_gr<- makeGRangesFromDataFrame(peaks, keep.extra.columns = TRUE)
+peaks_gr$peak_score <- peaks$qval
+peaks_gr$chip_mid <- (start(peaks_gr) + end(peaks_gr))/2
+
+peaks_gr <- peaks_gr %>%
+  plyranges::anchor_center() %>%
+  plyranges::mutate(width = 601)
+chip <- peaks_gr 
+
+uniq_motif<- left_plus %>%
+  mutate(cohesin_fragment = ifelse(dplyr::between(end_centered, 15, 80), 1, 0)) %>% 
+  dplyr::group_by(motif_id) %>% 
+  dplyr::mutate(num_cohesin = sum(cohesin_fragment),
+         num_fragment = max(dplyr::row_number()),
+         myskew = num_cohesin / num_fragment) %>% 
+  distinct(motif_id, .keep_all = TRUE) %>% 
+  dplyr::select(seqnames, motif_mid, motif_id,skew,myskew) %>% 
+  arrange(motif_id)
+
+uniq_motif_gr <- makeGRangesFromDataFrame(uniq_motif, keep.extra.columns=TRUE,
+                                 seqnames.field="seqnames",
+                                 start.field="motif_mid",
+                                 end.field="motif_mid")
+
+uniq_motif_gr$motif_mid <- uniq_motif$motif_mid
+
+ovl <- findOverlaps(uniq_motif_gr, chip, maxgap = 0)
+
+out <- as.data.frame(uniq_motif_gr[queryHits(ovl)]) %>% 
+    cbind(chip_id = subjectHits(ovl),
+          chip_start = start(chip)[subjectHits(ovl)],
+          chip_mid = chip$chip_mid[subjectHits(ovl)],
+          chip_end = end(chip)[subjectHits(ovl)],
+          chip_qval = chip$peak_score[subjectHits(ovl)],
+          chip_signalValue = chip$signalValue[subjectHits(ovl)],
+          chip_score = chip$score[subjectHits(ovl)]) %>% 
+  mutate(dist = abs(chip_mid - motif_mid))
+
+out <- out %>% 
+  dplyr::group_by(motif_id) %>% 
+  dplyr::mutate(n = max(dplyr::row_number())) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+uniq_motif <- uniq_motif %>% 
+  left_join(out, by = "motif_id") 
+
+motifs <- uniq_motif
+
+```
+
+
+
+```{r, fig.height = 6, fig.width = 8}
+check <- left_join(left_plus, motifs, by = "motif_id")
+
+probs <- quantile(check$chip_signalValue, probs = seq(0,1,0.1), na.rm = TRUE)
+check$SV_cat <- cut(check$chip_signalValue, breaks =  probs, include.lowest = TRUE)
+key <- data.frame(cbind(levels(as.factor(check$SV_cat)), 1:length(levels(as.factor(check$SV_cat)))))
+colnames(key) <- c("SV_cat", "SV_level")
+check <- left_join(check, key, by = "SV_cat")
+
+nocohesin <- check %>% 
+  filter(is.na(dist) | abs(dist)>200) %>% 
+  mutate(cohesin_type = "no_cohesin")
+cohesin <- check %>% 
+  filter(abs(dist)<50) %>% 
+  mutate(cohesin_type = "cohesin")
+
+all <- rbind(nocohesin,cohesin)
+
+temp <- all %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  mutate(fragment_length = end_centered - start_centered) %>% 
+  mutate(chip_signalValue = ifelse(cohesin_type == "no_cohesin", 0, chip_signalValue))
+  
+
+p1 <- temp %>% 
+    mutate(FL_cat = cut(fragment_length, breaks = c(seq(30,150,5), 215))) %>% 
+   mutate(lower = as.numeric( sub("\\((.+),.*", "\\1", FL_cat)),
+         upper = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", FL_cat))) %>% 
+  group_by(FL_cat) %>% 
+  dplyr::summarize(med = median(chip_signalValue),
+            lower = first(lower), 
+            upper = first(upper)) %>% 
+    ggplot(aes(x = lower, y = med))+
+   geom_point(color ="royalblue", size = 3)+
+  ylab("Median RAD21 Signal Value")+
+  xlab("Fragment Length Bin (Lower)")+
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+   scale_x_continuous(breaks=seq(0,150, 20))
+
+p2 <- temp %>% 
+    mutate(FL_cat = cut(fragment_length, breaks = c(seq(30,150,5), 215))) %>% 
+   mutate(lower = as.numeric( sub("\\((.+),.*", "\\1", FL_cat)),
+         upper = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", FL_cat))) %>%
+  group_by(FL_cat) %>% 
+  dplyr::summarize(med = median(log10(interaction_length+1)),
+            lower = first(lower), 
+            upper = first(upper)) %>% 
+    ggplot(aes(x = lower, y = med))+
+    geom_point(color ="royalblue", size = 3)+
+  ylab("Log10 Interaction Length")+
+  xlab("Fragment Length")+
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+   scale_x_continuous(breaks=seq(0,150, 20))
+
+```
+
+### 4C
+```{r, fig.width = 8, fig.height = 4}
+p2
+
+#ggsave(paste0(path,"4D_Log10_IL.png"), width=8, height=4)
+```
+
+
+### Supplemental
+```{r, fig.width = 10, fig.height = 8}
+plot_grid(plotlist = list(p1,p2), align = "hv", axis = "tblr", ncol = 1)
+
+#ggsave(paste0(path,"4D_RAD21_FL.png"), width=10, height=8)
+```
+
+### 4E
+```{r,fig.width = 8, fig.height = 4}
+left_plus <- readRDS(file = paste0(path, "left_plus_annot.RDS"))
+
+left_plus<- left_plus %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  mutate(fragment_length = end_centered - start_centered) %>% 
+ mutate(cohesin_fragment = ifelse(fragment_length < 115, 1, 0)) %>% 
+     mutate(interaction_length = abs(end2-start))
+  
+
+peaks <- read_tsv("/aryeelab/users/corri/data/K562_RAD21_ChIP_ENCFF330SHG.bed", col_names = FALSE)
+colnames(peaks) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+peaks_gr<- makeGRangesFromDataFrame(peaks, keep.extra.columns = TRUE)
+peaks_gr$peak_score <- peaks$qval
+peaks_gr$chip_mid <- (start(peaks_gr) + end(peaks_gr))/2
+
+peaks_gr <- peaks_gr %>%
+  plyranges::anchor_center() %>%
+  plyranges::mutate(width = 601)
+chip <- peaks_gr 
+
+uniq_motif<- left_plus %>%
+#  mutate(cohesin_fragment = ifelse(dplyr::between(end_centered, 15, 80), 1, 0)) %>% 
+ #  mutate(cohesin_fragment = ifelse(fragment_length < 115, 1, 0)) %>% 
+  group_by(motif_id) %>% 
+  dplyr::mutate(num_cohesin = sum(cohesin_fragment),
+         num_fragment = max(dplyr::row_number()),
+         myskew = num_cohesin / num_fragment) %>% 
+  distinct(motif_id, .keep_all = TRUE) %>% 
+  dplyr::select(seqnames, motif_mid, motif_id,skew,myskew) %>% 
+  arrange(motif_id)
+
+uniq_motif_gr <- makeGRangesFromDataFrame(uniq_motif, keep.extra.columns=TRUE,
+                                 seqnames.field="seqnames",
+                                 start.field="motif_mid",
+                                 end.field="motif_mid")
+
+uniq_motif_gr$motif_mid <- uniq_motif$motif_mid
+
+ovl <- findOverlaps(uniq_motif_gr, chip, maxgap = 0)
+
+out <- as.data.frame(uniq_motif_gr[queryHits(ovl)]) %>% 
+    cbind(chip_id = subjectHits(ovl),
+          chip_start = start(chip)[subjectHits(ovl)],
+          chip_mid = chip$chip_mid[subjectHits(ovl)],
+          chip_end = end(chip)[subjectHits(ovl)],
+          chip_qval = chip$peak_score[subjectHits(ovl)],
+          chip_signalValue = chip$signalValue[subjectHits(ovl)],
+          chip_score = chip$score[subjectHits(ovl)]) %>% 
+  mutate(dist = abs(chip_mid - motif_mid))
+
+out <- out %>% 
+  group_by(motif_id) %>% 
+  mutate(n = max(row_number())) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+uniq_motif <- uniq_motif %>% 
+  left_join(out, by = "motif_id") 
+
+motifs <- uniq_motif
+
+uniq_motif$dist[is.na(uniq_motif$dist)] <- 310
+uniq_motif$chip_qval[is.na(uniq_motif$chip_qval)] <- 0
+uniq_motif$dist <- abs(uniq_motif$dist)
+
+nocohesin <- uniq_motif %>% 
+  filter(dist > 200) 
+
+cohesin <- uniq_motif %>% 
+  filter(dist < 50) 
+
+cohesin$cohesin_status <- "Cohesin"
+nocohesin$cohesin_status <- "No Cohesin"
+rbind(cohesin,nocohesin) %>% 
+  ggplot(aes(x = 100*myskew.x, fill = as.factor(cohesin_status), color = as.factor(cohesin_status))) +
+  geom_density(alpha = 0.75, linewidth = 1.5)+
+  theme_bw() +
+    scale_fill_manual(values=c("darkred","darkblue")) +
+  scale_color_manual(values=c("darkred","darkblue")) +
+  ylab("Density")  +
+  xlab("% TF protected fragments")+
+    guides(col = FALSE)+
+  labs(fill = "RAD21 ChIP")+
+  geom_vline(xintercept = 55, linetype = "dashed")+
+  scale_x_continuous(breaks=seq(0,100,10), limits = c(0,100))+
+   theme_classic() +
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  theme(legend.position = "none")
+
+#ggsave(paste0(path,"4F_RAD21_TF_den.png"), width=8, height=4)
+```
+
+### 4F
+```{r, fig.width = 8,fig.height =4}
+left_plus <- readRDS(file = paste0(path, "left_plus_annot.RDS"))
+
+left_plus<- left_plus %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  mutate(fragment_length = end_centered - start_centered) %>% 
+ mutate(cohesin_fragment = ifelse(fragment_length < 115, 1, 0)) %>% 
+     mutate(interaction_length = abs(end2-start))
+
+left_plus %>% 
+    mutate(cohesin_fragment = factor(cohesin_fragment, levels=c(1,0))) %>% 
+    ggplot(aes(interaction_length/1000, fill = cohesin_fragment, col = cohesin_fragment)) +
+    geom_density(alpha = 0.75, linewidth = 1.5)+
+    theme_classic() + 
+  scale_x_log10(breaks=c(1,10,100,1000,10000),limits = c(10^-2,10^4), labels=scales::comma)+
+    scale_fill_manual(values=c("darkred","darkblue")) +
+  scale_color_manual(values=c("darkred","darkblue")) +
+  ylab("Density") +
+  xlab("Interaction Length (kb)")+
+  labs(fill = "TF protected Fragment")+
+  guides(col = FALSE)+
+   theme_classic() +
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  theme(legend.position = "none")
+  
+
+#ggsave(paste0(path,"4E_IL_density.png"), width=8, height=4)
+```
+
+
+### 4G
+```{r, fig.width = 9, fig.height = 5}
+d1 <- data.frame(IL_start = seq(0, 1e7, 1000)) %>% 
+  mutate(IL_mid = IL_start + 500,
+         IL_end = IL_start + 1000, 
+         type = "1")
+
+d2 <- data.frame(IL_start = seq(0, 1e7, 1000)) %>% 
+  mutate(IL_mid = IL_start + 500,
+         IL_end = IL_start + 1000, 
+         type = "0") 
+
+dat<- rbind(d1,d2)
+
+dat<- dat %>% 
+  mutate(bin_type = paste0(type, ":", IL_mid))
+
+check <- left_plus %>% 
+    mutate(cohesin_fragment = factor(cohesin_fragment, levels=c(1,0))) %>% 
+  filter(interaction_length < 1e7) %>% 
+    ungroup() %>% 
+  group_by(cohesin_fragment) %>% 
+  mutate(count_per_CA = max(row_number())) %>% 
+  mutate(interaction_length_bin = cut(interaction_length, breaks = seq(0, 1e7, 1000))) %>%
+  mutate(lower = as.numeric( sub("\\((.+),.*", "\\1", interaction_length_bin)),
+         upper = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", interaction_length_bin))) %>% 
+  mutate(mid_IL_bin = (lower + upper)/2) %>% 
+  group_by(cohesin_fragment, interaction_length_bin) %>% 
+  summarize(type = dplyr::first(cohesin_fragment),
+            interaction_length_bin = dplyr::first(mid_IL_bin),
+            count = n(),
+            count_per_CA = dplyr::first(count_per_CA),
+            count_norm = count / count_per_CA) 
+
+
+check <-check %>% 
+  mutate(bin_type = paste0(type, ":", interaction_length_bin))
+
+out <- left_join(dat, check, by = "bin_type")
+
+
+
+dat<- out %>% 
+  ungroup() %>% 
+  mutate(log_interaction_length = log10(IL_mid)) %>% 
+  mutate(log_IL_bin = cut(log_interaction_length, breaks = 50)) %>% 
+  group_by(type.x, log_IL_bin) %>% 
+  summarize(num_bins = max(row_number()),
+    LC_sum = sum(count_norm, na.rm = TRUE),
+    avg_LC = LC_sum / num_bins) %>% 
+   mutate(lower_log_bin = as.numeric( sub("\\((.+),.*", "\\1", log_IL_bin)),
+         upper_log_bin = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", log_IL_bin))) %>% 
+  mutate(mid_log_bin = (lower_log_bin + upper_log_bin)/2) %>% 
+  mutate(log_avg_LC = log10(avg_LC))
+
+dat %>% 
+  mutate(bin = 10^mid_log_bin) %>% 
+  ggplot(aes(x = bin/1000, y = avg_LC, color = type.x, group = type.x)) +
+  geom_smooth(se = FALSE,span = 0.3, linewidth = 1.5)+
+ # geom_point() +
+#  scale_x_log10(breaks=c(1e3, 3e3, 1e4, 3e4, 1e5, 3e5, 1e6, 3e6, 1e7) )+
+  scale_x_log10(breaks=c(1,10,100,1000,10000),labels=scales::comma)+
+  scale_y_log10(breaks=c(0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6))+
+  scale_color_manual( values = c("royalblue","firebrick3"))+
+  theme(legend.position = "none")+
+  xlab("Interaction Length (kb)")+
+  ylab("Contact Probability") +
+  theme_classic() +
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  theme(legend.position = "none")
+
+#ggsave(paste0(path,"4G_P(S).png"), width=8, height=5)
+```
+
+```{r}
+left_plus <- readRDS(file = paste0(path, "left_plus_annot.RDS"))
+
+left_plus<- left_plus %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  mutate(fragment_length = end_centered - start_centered) %>% 
+ mutate(cohesin_fragment = ifelse(fragment_length < 115, 1, 0)) %>% 
+     mutate(interaction_length = abs(end2-start))
+
+left_plus %>% 
+  filter(interaction_length > 10000) %>% 
+  group_by(cohesin_fragment) %>% 
+  summarize(count = n()) %>% 
+  ungroup() %>% 
+  mutate(freq = count / dplyr::first(count))
+```
+
+
+```{r}
+left_plus<-left_plus %>% 
+  mutate(LR = ifelse(interaction_length > 10000,1,0)) 
+
+tbl = table(left_plus$LR, left_plus$cohesin_fragment)
+margin.table(tbl,2)
+prop.table(tbl,2)
+chisq.test(tbl)
+```
+
+# FIGURE 5
+
+### Multiple testing
+
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS") # 887980 
+ctcf_motifs$motif_mid <- round(start(ctcf_motifs) + width(ctcf_motifs)/2)
+
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+all_peaks <- readRDS(paste0(path, "GW_pvals.RDS"))
+
+peaks_gr <- makeGRangesFromDataFrame(all_peaks, 
+                                     keep.extra.columns=FALSE,
+                                     seqnames.field = "chr",
+                                     start.field = "window_mid", 
+                                     end.field = "window_mid")
+
+peaks_gr$FF_pval <- all_peaks$pvalue
+peaks_gr$peak_summit <- all_peaks$window_mid
+
+gr_motifs <- ctcf_motifs 
+
+ovl <- findOverlaps(gr_motifs, peaks_gr, maxgap = 50)
+
+output <- as.data.frame(gr_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_ID = queryHits(ovl),
+          peak_ID = subjectHits(ovl),
+          FF_pval = peaks_gr$FF_pval[subjectHits(ovl)],
+          window_mid = peaks_gr$peak_summit[subjectHits(ovl)])
+
+output<- output %>% 
+  mutate(distance = abs(window_mid - motif_mid)) %>% 
+  filter(distance < 30) 
+
+# choose closest p-value w/in 30bp of motif
+check <- output %>% 
+  group_by(motif_ID) %>% 
+  arrange(distance) %>% 
+  dplyr::slice(1)
+
+# closest motif to p-value is picked (no duplicate p-value locations)
+temp <- check %>%
+  group_by(peak_ID) %>%
+  arrange(distance) %>%
+  dplyr::slice(1)
+
+ctcf_motifs$FF_pval <- rep(1, length(ctcf_motifs))
+ctcf_motifs$FF_pval[temp$motif_ID] <- temp$FF_pval
+
+ctcf_motifs$FF_qval <- p.adjust(ctcf_motifs$FF_pval, method = "BH")
+ctcf_motifs %>% 
+  filter(FF_pval < 1e-05) %>% 
+  arrange(desc(FF_qval))
+
+```
+
+### Start here
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+left_plus <- readRDS(file = paste0(path, "left_plus_annot_cluster.RDS"))
+fragment_annot <- left_plus
+```
+
+
+```{r, fig.width = 10, fig.height = 8}
+left_plus <- fragment_annot %>% 
+  ungroup() %>% 
+  filter(fragment_motif == "left_plus") %>% 
+  group_by(motif_id) %>% 
+  dplyr::slice(1)
+left_plus <- left_plus %>% 
+  ungroup() %>% 
+  dplyr::select(MB_1_TssA,MB_2_TssAFlnk, MB_3_TxFlnk,MB_4_Tx,MB_5_TxWk,MB_6_EnhG,
+                MB_7_Enh,MB_10_TssBiv,MB_11_BivFlnk,MB_12_EnhBiv,
+                MB_13_ReprPC,MB_14_ReprPCWk,MB_8_ZNF,MB_9_Het,MB_15_Quies)
+
+
+left_plus <- rev(left_plus)
+#left_plus <- left_plus[,21:35]
+x <- strsplit(colnames(left_plus), "_")
+cols <- sapply( x, "[", 3 )
+colnames(left_plus)<- cols
+##########
+
+cormat <- cor(left_plus)
+melted_cormat <- reshape2::melt(cormat)
+
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()+
+  theme_classic()+
+   scale_fill_gradient2(
+    high = "royalblue",
+    mid = "black",
+    low = "firebrick3")+
+      labs(fill="Chromatin State")+
+  xlab("Chromatin State")+
+  ylab("Chromatin State")+
+   theme(plot.title = element_text(color = "black", family = "Times New Roman", size =18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),  
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#ggsave(paste0(path,"5_cor_heatmap.png"), width=10, height=8)
+```
+
+### Plot clusters
+```{r}
+left_plus <- readRDS(file = paste0(path, "left_plus_annot_cluster.RDS"))
+```
+
+```{r, fig.width = 12, fig.height = 7}
+uniq_motif <- left_plus %>% 
+  group_by(motif_id) %>% 
+  dplyr::slice(1)
+
+uniq_motif<- uniq_motif %>% 
+  ungroup() %>% 
+  arrange(type, Active) %>% 
+  mutate(order = dplyr::row_number()) %>% 
+  dplyr::select(order, MB_1_TssA,MB_2_TssAFlnk, MB_3_TxFlnk,MB_4_Tx,MB_5_TxWk,MB_6_EnhG,
+                MB_7_Enh,MB_10_TssBiv,MB_11_BivFlnk,MB_12_EnhBiv,
+                MB_13_ReprPC,MB_14_ReprPCWk,MB_8_ZNF,MB_9_Het,MB_15_Quies,type)
+
+uniq_motif <- rev(uniq_motif)
+
+x <- strsplit(colnames(uniq_motif)[2:16], "_")
+cols <- sapply( x, "[", 3 )
+colnames(uniq_motif)[2:16]<- cols
+UM_scaled <- scale(uniq_motif[,2:16])
+# UM_scaled<- data.frame(cbind(UM_scaled,uniq_motif$order))
+# colnames(UM_scaled)[16] <- c("order")
+########################
+temp<- data.frame(cbind(UM_scaled,uniq_motif$order, as.character(uniq_motif$type)))
+colnames(temp)[16:17] <- c("order", "type")
+temp %>%
+  filter(type == "Quiescent") %>%
+  arrange(desc(as.numeric(order))) %>% 
+  dplyr::slice(1) %>% 
+  pull(order) # 3595
+temp %>%
+  filter(type == "Biv_Polycomb") %>%
+  arrange(desc(as.numeric(order))) %>% 
+  dplyr::slice(1) %>% 
+  pull(order) # 6751
+########################
+UM_scaled<- data.frame(cbind(UM_scaled,uniq_motif$order))
+colnames(UM_scaled)[16] <- c("order")
+UM_scaled <- UM_scaled %>% 
+  pivot_longer(TssA:Quies, names_to="chrom_type")
+UM_scaled$value_thresh <- UM_scaled$value
+UM_scaled$value_thresh[UM_scaled$value_thresh > 2] <- 2
+UM_scaled$value_thresh[UM_scaled$value_thresh < -2] <- -2
+
+#png(file=paste0(path,"5_full_cluster.png"), width=12, height=8, units="in", res=500)
+UM_scaled %>%
+    mutate(chrom_type = factor(chrom_type, levels=cols)) %>% 
+  ggplot(aes(chrom_type, order, fill=as.numeric(value_thresh) )) + 
+  geom_tile() +
+     scale_fill_gradient2(
+    high = "royalblue",
+    mid = "black",
+    low = "firebrick3")+
+     theme_classic()+
+   geom_hline(yintercept = 3595, linetype = "dashed", col = "white")+
+   geom_hline(yintercept = 6751, linetype = "dashed", col = "white")+
+    labs(fill="Chromatin State")+
+  xlab("Chromatin State")+
+  ylab("Order")+
+      theme(plot.title = element_text(color = "black", family = "Times New Roman", size =18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),  
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#dev.off()
+
+```
+
+
+# Use clusters to investigate cohesin mechanics
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+left_plus <- readRDS(file = paste0(path, "left_plus_annot_cluster.RDS"))
+
+left_plus<- left_plus %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  mutate(fragment_length = end_centered - start_centered) %>% 
+ mutate(cohesin_fragment = ifelse(fragment_length < 115, 1, 0)) %>% 
+     mutate(interaction_length = abs(end2-start))
+```
+
+
+```{r}
+uniq_motif <- left_plus %>% 
+  group_by(motif_id) %>% 
+  dplyr::slice(1) 
+
+probs <- quantile(uniq_motif$MB_15_Quies, probs = seq(0,1,0.1), na.rm = FALSE)
+left_plus$cat <- cut(left_plus$MB_15_Quies, breaks =  probs, include.lowest = TRUE)
+key <- data.frame(cbind(levels(as.factor(left_plus$cat)), 1:length(levels(as.factor(left_plus$cat)))))
+colnames(key) <- c("cat", "level")
+levels <- left_join(left_plus, key, by = "cat")
+
+quiescent <- levels %>% 
+  filter(level %in% c(9,10)) %>% 
+  filter(cluster ==3)
+#################################
+uniq_motif <- left_plus %>% 
+  group_by(motif_id) %>% 
+  dplyr::slice(1) 
+
+probs <- quantile(uniq_motif$Active, probs = seq(0,1,0.1), na.rm = FALSE)
+left_plus$cat <- cut(left_plus$Active, breaks =  probs, include.lowest = TRUE)
+key <- data.frame(cbind(levels(as.factor(left_plus$cat)), 1:length(levels(as.factor(left_plus$cat)))))
+colnames(key) <- c("cat", "level")
+levels <- left_join(left_plus, key, by = "cat")
+
+active <- levels %>% 
+  filter(level %in% c(9,10)) %>% 
+  filter(cluster ==1)
+#####################################
+uniq_motif <- left_plus %>% 
+  group_by(motif_id) %>% 
+  dplyr::slice(1) 
+
+probs <- quantile(uniq_motif$Biv_Polycomb, probs = seq(0,1,0.1), na.rm = FALSE)
+left_plus$cat <- cut(left_plus$Biv_Polycomb, breaks =  probs, include.lowest = TRUE)
+key <- data.frame(cbind(levels(as.factor(left_plus$cat)), 1:length(levels(as.factor(left_plus$cat)))))
+colnames(key) <- c("cat", "level")
+levels <- left_join(left_plus, key, by = "cat")
+
+biv_poly <- levels %>% 
+  filter(level %in% c(9,10)) %>% 
+  filter(cluster ==2)
+
+```
+
+### Figure 5E
+```{r, fig.width = 8, fig.height = 4}
+out <- rbind(active, quiescent,biv_poly)
+plot_data <- out %>% 
+  filter(cohesin_fragment ==1) %>% 
+  filter(dplyr::between(interaction_length, 1e4, 1e7))
+
+plot_data %>% 
+  ggplot(aes(x = interaction_length/1000, fill = type,col = type)) +
+  geom_density(alpha = 0.75) +
+  theme_classic()+
+   scale_fill_manual(values=c("darkred","darkblue", "skyblue4")) +
+  scale_color_manual(values=c("firebrick3","royalblue", "skyblue")) +
+  ylab("Density")  +
+  xlab("Interaction Length (kb)")+
+  labs(fill = "Chromatin annotation")+
+  scale_x_log10(breaks=c(10,100,1000,10000), labels = scales::comma)+
+    theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+  axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+  axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+  axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+  axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+  legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+  legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "plain")) +
+    theme(legend.position ="none")+
+  guides(col = FALSE) 
+
+#ggsave(paste0(path,"5_density.png"), width=8, height=4)
+```
+### Figure 5H, supplement
+```{r, fig.width = 8, fig.height = 4}
+med <- plot_data %>% 
+  group_by(type) %>% 
+  summarize(med = 10^(mean(log10(interaction_length)))) %>% 
+  mutate(level = c(1,2,3))
+
+plot_data %>% 
+  ggplot(aes(x = interaction_length/1000, y = type, fill = type,col = type)) +
+  stat_density_ridges(quantile_lines = TRUE, scale = 2,quantile_fun = mean)+
+  theme_ridges()+
+  scale_fill_manual(values=c("darkred","darkblue", "skyblue4")) +
+  scale_color_manual(values=c("firebrick3","royalblue", "skyblue")) +
+  ylab("")  +
+  xlab("Interaction Length (kb)")+
+  labs(fill = "Chromatin annotation")+
+  scale_x_log10(breaks=c(10,100,1000,10000), labels = scales::comma)+
+  guides(col = FALSE) +
+          theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "plain"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "plain")) +
+  theme(legend.position ="none")+
+  geom_text(data = med, aes(x = med/1000, y = c(1.5,3,4.3), label = scales::comma(med)), 
+            color = "white", family = "Times New Roman",size=6, fontface = "bold")
+
+
+#ggsave(paste0(path,"5_ridge.png"), width=8, height=4)
+```
+
+*P(S) - all cohesin bound*
+
+```{r, fig.width = 8, fig.height = 5}
+out <- rbind(active, quiescent,biv_poly)
+plot_data <- out %>% 
+  filter(cohesin_fragment ==1) 
+
+d1 <- data.frame(IL_start = seq(0, 1e7, 1000)) %>% 
+  mutate(IL_mid = IL_start + 500,
+         IL_end = IL_start + 1000, 
+         type = "Active")
+
+d2 <- data.frame(IL_start = seq(0, 1e7, 1000)) %>% 
+  mutate(IL_mid = IL_start + 500,
+         IL_end = IL_start + 1000, 
+         type = "Biv_Polycomb") 
+
+d3 <- data.frame(IL_start = seq(0, 1e7, 1000)) %>% 
+  mutate(IL_mid = IL_start + 500,
+         IL_end = IL_start + 1000, 
+         type = "Quiescent") 
+dat<- rbind(d1,d2,d3)
+
+dat<- dat %>% 
+  mutate(bin_type = paste0(type, ":", IL_mid))
+
+check <- plot_data %>% 
+  ungroup() %>% 
+  group_by(type) %>% 
+  mutate(count_per_CA = max(row_number())) %>% 
+  filter(interaction_length < 1e7) %>% 
+  mutate(interaction_length_bin = cut(interaction_length, breaks = seq(0, 1e7, 1000))) %>%
+  mutate(lower = as.numeric( sub("\\((.+),.*", "\\1", interaction_length_bin)),
+         upper = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", interaction_length_bin))) %>% 
+  mutate(mid_IL_bin = (lower + upper)/2) %>% 
+  group_by(type, interaction_length_bin) %>% 
+  summarize(type = dplyr::first(type),
+            interaction_length_bin = dplyr::first(mid_IL_bin),
+            count = n(),
+            count_per_CA = dplyr::first(count_per_CA),
+            count_norm = count / count_per_CA) 
+
+
+check <-check %>% 
+  mutate(bin_type = paste0(type, ":", interaction_length_bin))
+
+out <- left_join(dat, check, by = "bin_type")
+
+
+dat<- out %>% 
+  ungroup() %>% 
+  mutate(log_interaction_length = log10(IL_mid)) %>% 
+  mutate(log_IL_bin = cut(log_interaction_length, breaks = 50)) %>% 
+  group_by(type.x, log_IL_bin) %>% 
+  summarize(num_bins = max(row_number()),
+    LC_sum = sum(count_norm, na.rm = TRUE),
+    avg_LC = LC_sum / num_bins) %>% 
+   mutate(lower_log_bin = as.numeric( sub("\\((.+),.*", "\\1", log_IL_bin)),
+         upper_log_bin = as.numeric( sub("[^,]*,([^]]*)\\]", "\\1", log_IL_bin))) %>% 
+  mutate(mid_log_bin = (lower_log_bin + upper_log_bin)/2) %>% 
+  mutate(log_avg_LC = log10(avg_LC))
+
+dat %>% 
+  mutate(bin = (10^mid_log_bin)/1000) %>% 
+  ggplot(aes(x = bin, y = avg_LC, color = type.x, group = type.x)) +
+ # geom_point() +
+  geom_smooth(se = FALSE,span = 0.3)+
+  #geom_line() + 
+  scale_x_log10(breaks=c(1,10,100,1000,10000), labels = scales::comma)+
+  scale_y_log10(breaks=c(0, 1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6))+
+  theme_classic() +
+     scale_color_manual( values = c("skyblue", "royalblue","firebrick3"))+
+  guides(col = FALSE) +
+          theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "plain"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "plain")) +
+  labs(color="Chromatin state")+
+  xlab("Interaction Length (kb)")+
+  ylab("Contact Probability")
+
+#ggsave(paste0(path,"5_P_S_Curve.png"), width=8, height=5)
+```
+
+*mixed models*
+
+```{r}
+out <- rbind(active, quiescent,biv_poly)
+plot_data <- out %>% 
+  mutate(cohesin_fragment = factor(cohesin_fragment, levels=c(0, 1)))
+#######################################
+
+temp <- plot_data %>% 
+  filter(type == "Active")
+
+m1 <-lme(log10(interaction_length+1)~ cohesin_fragment, random=~1 | as.factor(motif_id), data = temp,control = lmeControl(opt = "optim"))
+confint <- intervals(m1)
+m1 <- data.frame(confint$fixed)[2,]
+rownames(m1) <- "Active"
+#######################################
+
+temp <- plot_data %>% 
+  filter(type == "Quiescent")
+
+m2 <-lme(log10(interaction_length+1)~ cohesin_fragment , random=~1 | as.factor(motif_id), data = temp,control = lmeControl(opt = "optim"))
+confint <- intervals(m2)
+m2 <- data.frame(confint$fixed)[2,]
+rownames(m2) <- "Quiescent"
+#######################################
+
+temp <- plot_data %>% 
+  filter(type == "Biv_Polycomb")
+
+m3 <-lme(log10(interaction_length+1)~ cohesin_fragment , random=~1 | as.factor(motif_id), data = temp,control = lmeControl(opt = "optim"))
+confint <- intervals(m3)
+m3 <- data.frame(confint$fixed)[2,]
+rownames(m3) <- "Biv_Polycomb"
+
+out <- rbind(m1,m2,m3)
+out$annot <- rownames(out)
+colnames(out)[2] <- "estimate"
+
+out %>% 
+  ggplot(aes(x = annot, y = estimate)) +        # ggplot2 plot with confidence intervals
+  geom_point(col = "magenta") +
+  geom_errorbar(aes(ymin = lower, ymax = upper)) +
+  theme_bw() +
+  #geom_hline(yintercept = 0) +
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),  
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size =12,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =12,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 12,face = "plain")) +
+  ggtitle("95% CIs: cohesin effect for different chromatin states") +
+  xlab("Chromatin Annotation") +
+  ylab("95% Confidence Interval")
+
+#ggsave("/aryeelab/users/corri/plots/CTCF_paper_figures/S_cohesin_lme.png", width=8, height=4)
+```
+
+
+```{r}
+temp <- plot_data %>% 
+  filter(cohesin_fragment ==1) %>% 
+  filter(dplyr::between(interaction_length,  1e4, 1e7)) 
+
+m1 <-lme(log10(interaction_length+1)~ type , random=~1 | as.factor(motif_id), data = temp,control = lmeControl(opt = "optim"))
+confint <- intervals(m1)
+out <- data.frame(confint$fixed)[2:3,]
+out$annot <- c("Biv_Polycomb", "Active")
+
+colnames(out)[2] <- "estimate"
+
+out %>% 
+  ggplot(aes(x = annot, y = estimate)) +        # ggplot2 plot with confidence intervals
+  geom_point(col = "magenta") +
+  geom_errorbar(aes(ymin = lower, ymax = upper)) +
+  theme_bw() +
+  geom_hline(yintercept = 0, col = "firebrick3") +
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 16, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),  
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size =12,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =12,face = "plain"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 12,face = "plain")) +
+  ggtitle("95% CIs: effect of chromatin state on cohesin extrusion") +
+  xlab("Chromatin Annotation") +
+  ylab("95% Confidence Interval")
+```
+
+### Look at enhancers, RNAPII
+
+```{bash, eval = FALSE}
+#RNAPII, https://www.encodeproject.org/files/ENCFF355MNE/
+wget https://www.encodeproject.org/files/ENCFF355MNE/@@download/ENCFF355MNE.bed.gz
+gunzip ENCFF355MNE.bed.gz
+mv ENCFF355MNE.bed K562_RNAPII_peaks_ENCFF355MNE.bed
+
+# H3K27ac, https://www.encodeproject.org/files/ENCFF544LXB/
+wget https://www.encodeproject.org/files/ENCFF544LXB/@@download/ENCFF544LXB.bed.gz
+gunzip ENCFF544LXB.bed.gz
+mv ENCFF544LXB.bed K562_H3K27ac_peaks_ENCFF544LXB.bed
+```
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+#RNAPII
+RNAPII <- read_tsv(paste0(path, "K562_RNAPII_peaks_ENCFF355MNE.bed"), col_names = FALSE)
+colnames(RNAPII) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+RNAPII_gr <- makeGRangesFromDataFrame(RNAPII)
+RNAPII_gr$qval <- RNAPII$qval
+RNAPII_gr$peak_mid <- (start(RNAPII_gr) + end(RNAPII_gr))/2
+
+
+# H3K27ac
+H3K27ac <- read_tsv(paste0(path, "K562_H3K27ac_peaks_ENCFF544LXB.bed"), col_names = FALSE)
+colnames(H3K27ac) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+H3K27ac_gr <- makeGRangesFromDataFrame(H3K27ac)
+H3K27ac_gr$qval <- H3K27ac$qval
+H3K27ac_gr$peak_mid <- (start(H3K27ac_gr) + end(H3K27ac_gr))/2
+```
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+#left_plus <- readRDS(file = paste0(path, "left_plus_annot_cluster.RDS"))
+
+left_plus <- readRDS(file = paste0(path, "left_plus_annot_cluster_FF_pval.RDS"))
+
+# left_plus<- left_plus %>% 
+#   filter(peak_pval ==0)
+
+left_plus<- left_plus %>% 
+  filter(start_centered < -15) %>% 
+  filter(end_centered > 15) %>% 
+  mutate(fragment_length = end_centered - start_centered) %>% 
+ mutate(cohesin_fragment = ifelse(fragment_length < 115, 1, 0)) %>% 
+     mutate(interaction_length = abs(end2-start))
+
+uniq_motif<- left_plus %>% 
+  distinct(motif_id, .keep_all = TRUE) %>% 
+  dplyr::select(seqnames, motif_mid, motif_id) %>% 
+  arrange(motif_id)
+
+uniq_motif$MB <- uniq_motif$motif_mid + 1e6
+
+uniq_motif_gr <- makeGRangesFromDataFrame(uniq_motif, keep.extra.columns=TRUE,
+                                 seqnames.field="seqnames",
+                                 start.field="motif_mid",
+                                 end.field="MB")
+```
+
+
+```{r}
+fragment_motif_annot <- function(plus_fragment, uniq_motif_gr, chrom_stat){
+  ovl <- findOverlaps(uniq_motif_gr, chrom_stat)
+  chrom_stat_signal <- data.frame(
+    # pairs file columns
+    motif_id = uniq_motif_gr$motif_id[queryHits(ovl)],
+    start_pairs = start(uniq_motif_gr)[queryHits(ovl)],
+    end_pairs = end(uniq_motif_gr)[queryHits(ovl)],
+    # chromatin annotation file columns
+    start_chrom = start(chrom_stat)[subjectHits(ovl)],
+    end_chrom = end(chrom_stat)[subjectHits(ovl)],
+    qval= chrom_stat$qval[subjectHits(ovl)]) 
+  
+  chrom_stat_signal$start_vec <- pmax(chrom_stat_signal$start_pairs,chrom_stat_signal$start_chrom)
+  chrom_stat_signal$end_vec <- pmin(chrom_stat_signal$end_pairs,chrom_stat_signal$end_chrom)
+  chrom_stat_signal$width <- (chrom_stat_signal$end_vec - chrom_stat_signal$start_vec)
+  
+  # get total amount of each chromatin annotation for each region
+  chrom_stat_signal_annot <- chrom_stat_signal %>% 
+    group_by(motif_id) %>% 
+    summarize(
+      motif_id = dplyr::first(motif_id),
+      tot_bp = sum(width),
+      num_peaks = n()) %>% 
+    mutate(perc_bp = 100* (tot_bp / 1e6))
+  
+  plus_fragment <- plus_fragment %>% 
+    mutate(interaction_length = abs(end2-start))
+  
+  # annotate each fragment by motif-level chromatin annotation
+  plus_fragment_annot <- left_join(plus_fragment,chrom_stat_signal_annot, by = "motif_id") %>% 
+    arrange(motif_id)
+  
+  plus_fragment_annot["perc_bp"][is.na(plus_fragment_annot["perc_bp"])] <- 0
+  plus_fragment_annot["num_peaks"][is.na(plus_fragment_annot["num_peaks"])] <- 0
+
+  return(plus_fragment_annot)
+}
+```
+
+```{r}
+left_plus <- fragment_motif_annot(left_plus, uniq_motif_gr, RNAPII_gr)
+colnames(left_plus)[47:49] <- paste0("RNAPII_", colnames(left_plus)[47:49])
+
+left_plus <- fragment_motif_annot(left_plus, uniq_motif_gr, H3K27ac_gr)
+colnames(left_plus)[50:52] <- paste0("H3K27ac_", colnames(left_plus)[50:52])
+```
+
+
+
+
+```{r,fig.width = 8, fig.height=4}
+uniq_motif <- left_plus %>% 
+  group_by(motif_id) %>% 
+  dplyr::slice(1)
+probs <- quantile(uniq_motif$H3K27ac_perc_bp, probs = seq(0,1,0.1), na.rm = FALSE)
+left_plus$cat <- cut(left_plus$H3K27ac_perc_bp, breaks =  probs, include.lowest = TRUE)
+key <- data.frame(cbind(levels(as.factor(left_plus$cat)), 1:length(levels(as.factor(left_plus$cat)))))
+colnames(key) <- c("cat", "level")
+levels <- left_join(left_plus, key, by = "cat")
+
+levels <- levels %>% 
+  mutate(level = factor(level, levels=c(1:10))) %>% 
+  filter(cohesin_fragment ==1) %>% 
+  filter(dplyr::between(interaction_length,  1e4, 1e7)) 
+med <- levels %>% 
+  group_by(level) %>% 
+  summarize(
+    med = median((interaction_length)),
+            avg = 10^(mean(log10(interaction_length))))
+```
+
+
+```{r}
+med<- med[c(1,10),]
+
+ridge1 <- levels %>% 
+  filter(level %in% c(1,10)) %>% 
+ ggplot(aes(x = (interaction_length/1000), 
+            y = level,
+            fill = level,
+            col=level)) +
+     stat_density_ridges(quantile_lines = TRUE, scale = 2,quantile_fun = mean)+
+  theme_ridges()+
+  labs(fill="H3K27ac Peak Quantiles")+
+  xlab("Interaction Length (kb)")+
+  ylab("") +
+  guides(col = FALSE) +
+    scale_x_log10(breaks=c(10,100,1000,10000), labels = scales::comma)+
+   scale_fill_manual(values=c("darkred", "skyblue4")) +
+  scale_color_manual(values=c("firebrick3","skyblue")) +
+  theme(legend.position="none")+
+    ggtitle("H3K27ac")+
+  geom_text(data = med, aes(x = avg/1000, y = c(1.5,3), label = scales::comma(avg)), 
+            color = "white", family = "Times New Roman",size=6, fontface = "bold")+
+  guides(col = FALSE) +
+          theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "plain"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "plain")) 
+ridge1
+```
+
+
+
+```{r}
+uniq_motif <- left_plus %>% 
+  group_by(motif_id) %>% 
+  dplyr::slice(1)
+probs <- quantile(uniq_motif$RNAPII_num_peaks, probs = seq(0,1,0.1), na.rm = FALSE)
+left_plus$cat <- cut(left_plus$RNAPII_num_peaks, breaks =  probs, include.lowest = TRUE)
+key <- data.frame(cbind(levels(as.factor(left_plus$cat)), 1:length(levels(as.factor(left_plus$cat)))))
+colnames(key) <- c("cat", "level")
+levels <- left_join(left_plus, key, by = "cat")
+
+levels <- levels %>% 
+  mutate(level = factor(level, levels=c(1:10))) %>% 
+  filter(cohesin_fragment ==1) %>% 
+  filter(dplyr::between(interaction_length,  1e4, 1e7)) 
+
+med <- levels %>% 
+  group_by(level) %>% 
+  summarize(
+    med = median((interaction_length)),
+            avg = 10^(mean(log10(interaction_length))))
+```
+
+```{r}
+med<- med[c(1,10),]
+ridge2 <-levels %>% 
+  filter(level %in% c(1,10)) %>% 
+ ggplot(aes(x = interaction_length/1000, 
+            y = level,
+            fill = level,
+            col=level)) +
+  stat_density_ridges(quantile_lines = TRUE, scale = 2,quantile_fun = mean)+
+  theme_ridges()+
+  labs(fill="RNAPII")+
+            theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "plain"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "plain")) +
+    xlab("Interaction Length (kb)")+
+  ylab("") +
+  guides(col = FALSE) +
+    scale_x_log10(breaks=c(10,100,1000,10000), labels = scales::comma)+
+   scale_fill_manual(values=c("darkred", "skyblue4")) +
+  scale_color_manual(values=c("firebrick3","skyblue")) +
+  theme(legend.position="none")+
+    ggtitle("RNAPII")+
+      geom_text(data = med, aes(x = avg/1000, y = c(1.5,3), label = scales::comma(avg)), 
+            color = "white", family = "Times New Roman",size=6, fontface = "bold")
+
+ridge2
+
+```
+### Figure 5f
+```{r, fig.width = 8, fig.height = 5}
+plot_grid(plotlist = list(ridge1,ridge2), align = "hv", axis = "tblr", ncol = 1)
+
+#ggsave(paste0(path,"5_K27ac_RNAPII_ridge.png"), width=8, height=5)
+```
+
+
+# Supplemental 
+stats_50bp.txt
+stats_75bp.txt
+stats_100bp.txt 
+stats_125bp.txt  
+stats_150bp.txt
+
+files moved from "/data/aryee/corri/CTCF_paper_fastq_dif_length/" to /aryeelab/users/corri/data/
+
+```{r}
+dir <- "/aryeelab/users/corri/data/"
+
+stats_files <- (vector(mode = "list", length = 5))
+iter <- 1
+for (read_len in c(50,75,100,125,150)){
+  print(read_len)
+  
+  stats <- read_table2(paste0(dir,"stats_",read_len,"bp.txt"), col_names = FALSE)
+  stats$read_length <- read_len
+  stats_files[[iter]] <- stats
+  iter <- iter + 1
+}
+
+stats_df <- bind_rows(stats_files) 
+```
+
+```{r}
+colnames(stats_df) <- c("Name","Number","Read_Length")
+
+
+obs_lig <- stats_df %>%
+  filter(Name %in% c("pair_types/uu","pair_types/Uu","pair_types/uU","pair_types/UR","pair_types/RU")) %>% 
+  group_by(Read_Length) %>% 
+  summarize(obs_lig = sum(Number))
+
+unobs_lig <- stats_df %>%
+  filter(Name %in% c("pair_types/UU")) %>% 
+  group_by(Read_Length) %>% 
+  summarize(unobs_lig = sum(Number))
+
+all_types <- cbind(obs_lig,unobs_lig)[,c(1,2,4)]
+
+all_types <- all_types %>% 
+  mutate(obs_lig_freq = obs_lig / (obs_lig + unobs_lig))
+
+RL_obs_lig <- all_types %>% 
+  mutate(perc_obs_lig = obs_lig_freq * 100) %>% 
+  ggplot(aes(x = Read_Length, y = perc_obs_lig,label =paste0(round(perc_obs_lig, 1), "%" ))) +
+  geom_point(col =  "royalblue") +
+  geom_text(hjust=0.5, vjust=-1.2, colour = "black", family = "Times New Roman",size = 5) +
+  theme_bw() +
+  geom_line(col = "darkblue", linetype = "dashed") +
+  xlab("Read Length (bp)") +
+  ylab("Percent Observed Ligations")+
+      theme(plot.title = element_text(size = 20, face = "bold",family = "Times New Roman"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),  
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 12,face = "plain"),
+        legend.position = "none") +
+  ylim(c(0,37)) +
+  ggtitle("% Observed Ligations Increases with Read Length")
+  
+RL_obs_lig 
+```
+
+### Directional nucleosome plot (supplemental)
+
+```{r}
+df_LR <- readRDS(file = paste0(path, "k562_ctcf_coverage_1000bp_fragment_length_LR.rds"))
+```
+
+```{r,fig.width = 10, fig.height = 5}
+df_LR %>% 
+  filter(size == "(120,151]") %>% 
+  mutate(dist_to_motif_center = pos_in_window-500) %>% 
+  group_by(fragment, motif_strand) %>% 
+  mutate(motif_tot = sum(cov, na.rm = T)) %>% 
+  mutate(cov = (cov / motif_tot)) %>%  
+  ungroup() %>% 
+  group_by(dist_to_motif_center, size,fragment, motif_strand) %>% 
+  summarise(cov=sum(cov, na.rm=T)) %>% 
+    ungroup() %>% 
+    mutate(motif_strand = factor(motif_strand, levels=c("+ Motif", "- Motif"))) %>% 
+    ggplot(aes(x = dist_to_motif_center, y=cov, col = motif_strand)) + 
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = 0, color="black", linetype ="dashed") + 
+  scale_color_manual(values=c("darkblue", "darkred")) +
+  facet_grid(size ~ fragment,scales = "free")+
+  scale_x_continuous(breaks = seq(-600, 600, 200)) +
+  xlab("Distance to CTCF motif center") +
+  ylab("Total Coverage") +
+theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+   labs(col = "Motif Strand")
+#ggsave(paste0(path,"Supplement_DN.png"), width=10, height=5)
+```
+
+
+### Occupancy and CTCF ChIP-seq (supplemental)
+
+
+*No CTCF binding*
+
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+# Remove overlapping motifs
+keep <- countOverlaps(gr_motifs, gr_motifs, ignore.strand=TRUE)==1 
+table(keep)
+gr_motifs <- gr_motifs[keep]
+gr_motifs$motif_mid <- round(start(gr_motifs) + width(gr_motifs)/2)
+```
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+all_peaks <- readRDS(paste0(path, "GW_peaks_1e-05.RDS"))
+all_peaks <- all_peaks %>%
+  dplyr::rename(window_mid = start) %>%
+  dplyr::select(-end)
+
+peaks_gr <- makeGRangesFromDataFrame(all_peaks,
+                                     keep.extra.columns=FALSE,
+                                     seqnames.field = "seqnames",
+                                     start.field = "peak_summit",
+                                     end.field = "peak_summit")
+```
+
+
+```{r}
+gr_motifs$motif_ID <- 1:length(gr_motifs)
+chip_ovl <- subsetByOverlaps(gr_motifs, chip_gr, maxgap = 200, ignore.strand=TRUE) 
+FP <- gr_motifs[! (gr_motifs$motif_ID %in% chip_ovl$motif_ID)] # 782274
+
+peak_ovl <- subsetByOverlaps(FP, peaks_gr, maxgap = 200, ignore.strand=TRUE) 
+FP <- FP[! (FP$motif_ID %in% peak_ovl$motif_ID)] # 778717
+
+
+gr_motifs<- FP %>% 
+  filter(seqnames == "chr1")
+
+```
+
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+anchors <- import(paste0(path,"K562_CTCF_signal_pval_ENCFF168IFW.bigWig"))
+anchors$peak_mid <- (start(anchors) + end(anchors))/2
+
+ovl <- findOverlaps(gr_motifs, anchors, maxgap = 0)
+
+out <- as.data.frame(gr_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      chip_id = subjectHits(ovl),
+          chip_start = start(anchors)[subjectHits(ovl)],
+          chip_mid = anchors$peak_mid[subjectHits(ovl)],
+          chip_end = end(anchors)[subjectHits(ovl)],
+          chip_score = anchors$score[subjectHits(ovl)]) %>% 
+  mutate(dist = chip_mid - motif_mid)
+
+out %>% 
+    filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(motif_mid,30779772-200,30779772+200))
+# 1456
+
+# pick motif closest to chip-seq peak center
+out <- out %>% 
+  ungroup() %>% 
+  group_by(chip_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+# pick chip-seq center closest to motif center
+out <- out %>% 
+  ungroup() %>% 
+  group_by(motif_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+
+ctcf_chip <- out %>% 
+  ungroup()
+
+# 28555
+chip_motif <- makeGRangesFromDataFrame(ctcf_chip,
+                                     keep.extra.columns = TRUE)
+
+max(chip_motif$chip_score)
+```
+
+```{r}
+print("read pairs")
+pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
+print("done reading pairs")
+```
+
+```{r}
+# left fragment
+gr_fragment1 <- makeGRangesFromDataFrame(pairs,
+                                 seqnames.field="chr1",
+                                 start.field="start1",
+                                 end.field="end1")
+# right fragment
+gr_fragment2 <- makeGRangesFromDataFrame(pairs,
+                                 seqnames.field="chr2",
+                                 start.field="start2",
+                                 end.field="end2")
+gr_fragment <- c(gr_fragment1, gr_fragment2)
+```
+
+*start here if you've already made the file*
+```{r}
+#gr_fragment
+#saveRDS(gr_fragment,"/aryeelab/users/corri/data/k562_ctcf_mapped.pairs_GRanges.rds")
+gr_fragment <-readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs_GRanges.rds")
+```
+
+### estimate occupancy broadly
+
+```{r}
+ovl <- findOverlaps(gr_fragment, chip_motif, maxgap = 0, ignore.strand=TRUE)
+fragments <- 
+    as.data.frame(chip_motif[subjectHits(ovl)]) %>% 
+    cbind(fragment_start = start(gr_fragment)[queryHits(ovl)],
+          fragment_end = end(gr_fragment)[queryHits(ovl)],
+          FL=width(gr_fragment)[queryHits(ovl)]) %>% 
+    group_by(motif_id) %>% 
+    dplyr::mutate(
+      frag_id = dplyr::row_number(),
+           start_centered = fragment_start - motif_mid,
+           end_centered = fragment_end - motif_mid,
+           num_frags_at_motif = max(dplyr::row_number()),
+           downstream_frags = sum(end_centered>60),
+           upstream_frags = sum(start_centered<(-60)),
+           skew = log2((downstream_frags+1)/(upstream_frags+1)))
+
+```
+
+```{r}
+check<- fragments %>% 
+  filter(FL < 120) %>%
+  filter(start_centered < -15) %>%
+  filter(end_centered > 15) %>%
+  dplyr::summarize(seqnames = dplyr::first(seqnames),
+    count = dplyr::n(),
+            num_frags_at_motif = dplyr::first(num_frags_at_motif),
+            chr = dplyr::first(seqnames),
+            motif_mid = dplyr::first(motif_mid),
+            chip_score = dplyr::first(chip_score)) %>% 
+  mutate(occupancy = 100*(count / num_frags_at_motif)) %>%   
+  filter(num_frags_at_motif > 100) 
+
+```
+
+```{r}
+level0 <- check
+```
+
+
+```{r}
+check %>%  
+  ggplot(aes(x = occupancy, y = "No CTCF Binding")) +
+   stat_density_ridges(quantile_lines = TRUE, scale = 2, fill = "darkred", color = "firebrick3")+
+   theme_ridges()+
+  guides(col = FALSE) +
+          theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "plain"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "plain")) +
+  theme(legend.position = "none")
+```
+
+*CTCF binding*
+```{r}
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+
+# Subset to 19bp (vs 34bp, 35bp) CTCF motifs that overlap a hires anchor
+# NOTE: In the current input file, they are all 19bp
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+# Remove overlapping motifs
+keep <- countOverlaps(gr_motifs, gr_motifs, ignore.strand=TRUE)==1 
+table(keep)
+gr_motifs <- gr_motifs[keep]
+gr_motifs$motif_mid <- round(start(gr_motifs) + width(gr_motifs)/2)
+```
+
+
+```{r}
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+# best peaks
+chip <- chip %>% 
+  filter(qval == max(chip$qval))
+
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+anchors <- chip_gr %>% 
+  plyranges::anchor_center() %>% 
+  plyranges::mutate(width = 100)
+
+min(width(anchors))
+max(width(anchors))
+
+```
+
+
+```{r}
+ovl <- findOverlaps(gr_motifs, anchors, maxgap = 0)
+
+out <- as.data.frame(gr_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      chip_id = subjectHits(ovl),
+          chip_start = start(anchors)[subjectHits(ovl)],
+          chip_mid = anchors$peak_mid[subjectHits(ovl)],
+          chip_end = end(anchors)[subjectHits(ovl)],
+          qval_score = anchors$qval[subjectHits(ovl)]) %>% 
+  mutate(dist = chip_mid - motif_mid)
+
+out <- out %>% 
+  ungroup() %>% 
+  group_by(chip_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+out <- out %>% 
+  filter(abs(dist) < 30)
+
+ctcf_chip <- out %>% 
+  ungroup()
+
+```
+
+```{r}
+nrow(ctcf_chip) # 28556
+
+gr_motifs <- makeGRangesFromDataFrame(ctcf_chip)
+                                     # seqnames.field = "seqnames",
+                                     # start.field = "motif_mid",
+                                     # end.field = "motif_mid")
+gr_motifs$motif_mid <- ctcf_chip$motif_mid
+```
+
+```{r}
+gr_motifs %>% 
+  filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(motif_mid,30779772-200,30779772+200))
+```
+
+
+```{r}
+path <- "/aryeelab/users/corri/data/replicate_FF_results/"
+anchors <- import(paste0(path,"K562_CTCF_signal_pval_ENCFF168IFW.bigWig"))
+anchors$peak_mid <- (start(anchors) + end(anchors))/2
+
+ovl <- findOverlaps(gr_motifs, anchors, maxgap = 0)
+
+out <- as.data.frame(gr_motifs[queryHits(ovl)]) %>% 
+    cbind(motif_id = queryHits(ovl),
+      chip_id = subjectHits(ovl),
+          chip_start = start(anchors)[subjectHits(ovl)],
+          chip_mid = anchors$peak_mid[subjectHits(ovl)],
+          chip_end = end(anchors)[subjectHits(ovl)],
+          chip_score = anchors$score[subjectHits(ovl)]) %>% 
+  mutate(dist = chip_mid - motif_mid)
+
+out %>% 
+    filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(motif_mid,30779772-200,30779772+200))
+# 1456
+
+# pick motif closest to chip-seq peak center
+out <- out %>% 
+  ungroup() %>% 
+  group_by(chip_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+# pick chip-seq center closest to motif center
+out <- out %>% 
+  ungroup() %>% 
+  group_by(motif_id) %>% 
+  arrange(abs(dist)) %>% 
+  dplyr::slice(1)
+
+
+ctcf_chip <- out %>% 
+  ungroup()
+
+# 28555
+chip_motif <- makeGRangesFromDataFrame(ctcf_chip,
+                                     keep.extra.columns = TRUE)
+
+chip_motif %>% 
+    filter(seqnames == "chr1") %>%
+  filter(dplyr::between(motif_mid,30779772-200,30779772+200))
+```
+
+
+### ctcf occupancy figure
+
+```{r}
+gr_fragment <-readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs_GRanges.rds")
+```
+
+```{r}
+ovl <- findOverlaps(gr_fragment, chip_motif, maxgap = 0, ignore.strand=TRUE)
+fragments <- 
+    as.data.frame(chip_motif[subjectHits(ovl)]) %>% 
+    cbind(fragment_start = start(gr_fragment)[queryHits(ovl)],
+          fragment_end = end(gr_fragment)[queryHits(ovl)],
+          FL=width(gr_fragment)[queryHits(ovl)]) %>% 
+    group_by(motif_id) %>% 
+    dplyr::mutate(
+      frag_id = dplyr::row_number(),
+           start_centered = fragment_start - motif_mid,
+           end_centered = fragment_end - motif_mid,
+           num_frags_at_motif = max(dplyr::row_number()),
+           downstream_frags = sum(end_centered>60),
+           upstream_frags = sum(start_centered<(-60)),
+           skew = log2((downstream_frags+1)/(upstream_frags+1)))
+
+fragments %>% 
+    filter(seqnames == "chr1") %>% 
+  filter(dplyr::between(motif_mid,30779772-200,30779772+200))
+```
+
+```{r}
+check<- fragments %>% 
+  filter(FL < 120) %>%
+  filter(start_centered < -15) %>%
+  filter(end_centered > 15) %>%
+  dplyr::summarize(seqnames = dplyr::first(seqnames),
+    count = dplyr::n(),
+            num_frags_at_motif = dplyr::first(num_frags_at_motif),
+            chr = dplyr::first(seqnames),
+            motif_mid = dplyr::first(motif_mid),
+            chip_score = dplyr::first(chip_score)) %>% 
+  mutate(occupancy = 100*(count / num_frags_at_motif)) %>%   
+  filter(num_frags_at_motif > 100) 
+```
+
+
+```{r}
+check %>% 
+  filter(dplyr::between(motif_mid, 30779772-200,30779772+200))
+```
+```{r}
+probs <- quantile(check$chip_score, probs = seq(0,1,0.1), na.rm = TRUE)
+check$chip_cat <- cut(check$chip_score, breaks =  probs, include.lowest = TRUE)
+key <- data.frame(cbind(levels(as.factor(check$chip_cat)), 1:length(levels(as.factor(check$chip_cat)))))
+colnames(key) <- c("chip_cat", "chip_level")
+check <- left_join(check, key, by = "chip_cat")
+```
+
+```{r}
+temp <- check %>% 
+  dplyr::select(occupancy, chip_level)
+
+temp0<- level0 %>% 
+  dplyr::select(occupancy) %>% 
+  mutate(chip_level = "0")
+
+temp <- rbind(temp,temp0)
+```
+
+
+```{r, fig.width = 8, fig.height = 6}
+temp %>%  
+  ggplot(aes(x = occupancy, y = as.factor(as.numeric(chip_level)), 
+             fill=as.factor(as.numeric(chip_level)))) +
+   stat_density_ridges(quantile_lines = TRUE, scale = 2, col = "skyblue")+
+   theme_ridges()+
+  guides(col = FALSE) +
+          theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+          axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "plain"),
+          legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "plain"),
+          legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "plain")) +
+  theme(legend.position = "none")+
+  scale_x_continuous( breaks = seq(0, 100, 10))+
+     scale_fill_viridis_d(option = "mako")+
+  xlab("Occupancy")+
+  ylab("ChIP-seq Signal Value Quantile")
+
+#ggsave(paste0(path,"Supp_occ_GW.png"), width=8, height=6)
+```
+
+
+
