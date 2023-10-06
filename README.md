@@ -10,5 +10,7 @@
 
 **To learn more about this project, click on this link to access our manuscript: LINK**
 
+## Workflow
+**To reproduce the results, start at the Protocol RMD file, then move through the figure files. Note that the MD files provide a more readable representation of these RMD files if you're interested in looking through the code but not running it.**
 
 
