@@ -29,8 +29,9 @@ library(cowplot)
 library(gridExtra)
 library(doParallel)
 library(bumphunter)
-library(dplyr)
 library(plyr)
+library(dplyr)
+library(ggplot2)
 library(tidyverse)
 
 num_cores = 8
