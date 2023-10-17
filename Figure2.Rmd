@@ -9,7 +9,6 @@ output:
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  fig.path = "Figures/Figure1-",
   out.width = "100%", 
   eval = FALSE
 )

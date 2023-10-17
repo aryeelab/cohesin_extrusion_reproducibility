@@ -55,6 +55,13 @@ Figure 1A is a schematic made in keynote, so no R code is required.
 
 # Figure 1B
 
+Figure 1B is a schematic made in biorender, so no R code is required.
+(Inserted below for reference.)
+
+<img src="Figures/MNase_cut.png" width="100%" />
+
+# Figure 1C
+
 **Fragment length distribution.**
 
 ``` r
@@ -161,7 +168,135 @@ ggsave(paste0(path,"1D_FL_dist.png"), width=8, height=5)
 
 <img src="Figures/1D_FL_dist.png" width="100%" />
 
-# Figure 1C
+# Figure 1D
+
+**Barplot of fragment length frequency.**
+
+``` r
+print("read pairs")
+pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
+print("done reading pairs")
+
+nrow(pairs) # 386,874,029
+```
+
+``` r
+FL_1 <- pairs$end1-pairs$start1
+FL_2 <- pairs$end2-pairs$start2
+
+FL <- c(FL_1,FL_2)
+FL <- data.frame(width = FL)
+b <- c(0, 80, 120, 151)
+
+FL$width_bin <- cut(FL$width, breaks=b)
+
+freq<- FL %>% 
+  filter(!is.na(width_bin)) %>% 
+  group_by(width_bin) %>% 
+  summarize(count = n()) %>% 
+  mutate(freq = count /sum(count))
+```
+
+``` r
+freq %>% 
+  ggplot( aes(x="", y=freq, fill = width_bin)) +
+  geom_col() +
+  geom_text(aes(label = paste0(width_bin, ": ",100*round(freq, 3), "%" )), colour = "black",position = position_stack(vjust = 0.5),
+            family = "Times New Roman",size = 6, fontface = "bold") +
+  theme_classic()+
+  xlab("")+
+  ylab("Frequency") +
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold")) +
+  scale_fill_manual(values = c("slategray1", "royalblue", "darkred")) +
+  guides(fill=guide_legend(title="Fragment Length"))
+
+ggsave(paste0(path,"1_FL_bar.png"), width=6, height=4)
+```
+
+<img src="Figures/1_FL_bar.png" width="100%" />
+
+### Estimates of % overlapping CBS (defined by motifs under ChIP-seq peaks)
+
+``` r
+# left fragment
+gr_fragment1 <- makeGRangesFromDataFrame(pairs,
+                                         seqnames.field="chr1",
+                                         start.field="start1",
+                                         end.field="end1")
+# right fragment
+gr_fragment2 <- makeGRangesFromDataFrame(pairs,
+                                         seqnames.field="chr2",
+                                         start.field="start2",
+                                         end.field="end2")
+gr_fragment <- c(gr_fragment1, gr_fragment2)
+```
+
+``` r
+chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
+colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
+chip_gr <- makeGRangesFromDataFrame(chip)
+chip_gr$qval <- chip$qval
+chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
+
+anchors <- chip_gr %>% 
+  plyranges::anchor_center() %>% 
+  plyranges::mutate(width = 60)
+```
+
+``` r
+ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
+
+# Subset to 19bp (vs 34bp, 35bp) CTCF motifs that overlap a hires anchor
+# NOTE: In the current input file, they are all 19bp
+gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
+# Remove overlapping motifs
+keep <- countOverlaps(gr_motifs, gr_motifs, ignore.strand=TRUE)==1 
+table(keep)
+gr_motifs <- gr_motifs[keep]
+keep <- countOverlaps(gr_motifs, anchors, maxgap = 0)>=1 
+table(keep) 
+gr_motifs <- gr_motifs[keep]
+gr_motifs$motif_mid <- round(start(gr_motifs) + width(gr_motifs)/2)
+```
+
+**Percent of short fragments (\< 80bp) overlapping CBS**
+
+``` r
+gr_fragment80 <- gr_fragment[width(gr_fragment)<=80]
+keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
+100*length(keep)/length(gr_fragment80)
+```
+
+*6.43%*
+
+**Percent of mid-size fragments (80:120bp) overlapping CBS**
+
+``` r
+gr_fragment80 <- gr_fragment[ (width(gr_fragment)>80) & (width(gr_fragment)<=120) ]
+keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
+100*length(keep)/length(gr_fragment80)
+```
+
+*2.11%*
+
+**Percent of long fragments (\>120bp) overlapping CBS**
+
+``` r
+gr_fragment80 <- gr_fragment[width(gr_fragment)>120]
+keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
+100*length(keep)/length(gr_fragment80)
+```
+
+*0.64%*
+
+# Figure 1E
 
 **Fragment coverage metaplot +/- 500bp around CTCF binding sites.**
 
@@ -342,141 +477,6 @@ df %>%
         legend.title=element_text(color = "black", family = "Times New Roman", size = 16,face = "plain"))+
   geom_vline(xintercept = c(-130-200,-130, 130, 130+200), col = "red")
 ```
-
-# Figure 1D
-
-**Barplot of fragment length frequency.**
-
-``` r
-print("read pairs")
-pairs <- readRDS("/aryeelab/users/corri/data/k562_ctcf_mapped.pairs.rds")
-print("done reading pairs")
-
-nrow(pairs) # 386,874,029
-```
-
-``` r
-FL_1 <- pairs$end1-pairs$start1
-FL_2 <- pairs$end2-pairs$start2
-
-FL <- c(FL_1,FL_2)
-FL <- data.frame(width = FL)
-b <- c(0, 80, 120, 151)
-
-FL$width_bin <- cut(FL$width, breaks=b)
-
-freq<- FL %>% 
-  filter(!is.na(width_bin)) %>% 
-  group_by(width_bin) %>% 
-  summarize(count = n()) %>% 
-  mutate(freq = count /sum(count))
-```
-
-``` r
-freq %>% 
-  ggplot( aes(x="", y=freq, fill = width_bin)) +
-  geom_col() +
-  geom_text(aes(label = paste0(width_bin, ": ",100*round(freq, 3), "%" )), colour = "black",position = position_stack(vjust = 0.5),
-            family = "Times New Roman",size = 6, fontface = "bold") +
-  theme_classic()+
-  xlab("")+
-  ylab("Frequency") +
-  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
-        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
-        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
-        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
-        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
-        axis.ticks.x=element_blank(),
-        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
-        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold")) +
-  scale_fill_manual(values = c("slategray1", "royalblue", "darkred")) +
-  guides(fill=guide_legend(title="Fragment Length"))
-
-ggsave(paste0(path,"1_FL_bar.png"), width=6, height=4)
-```
-
-<img src="Figures/1_FL_bar.png" width="100%" />
-
-### Estimates of % overlapping CBS (defined by motifs under ChIP-seq peaks)
-
-``` r
-# left fragment
-gr_fragment1 <- makeGRangesFromDataFrame(pairs,
-                                         seqnames.field="chr1",
-                                         start.field="start1",
-                                         end.field="end1")
-# right fragment
-gr_fragment2 <- makeGRangesFromDataFrame(pairs,
-                                         seqnames.field="chr2",
-                                         start.field="start2",
-                                         end.field="end2")
-gr_fragment <- c(gr_fragment1, gr_fragment2)
-```
-
-``` r
-chip <- read_tsv("/aryeelab/users/corri/data/K562_CTCF_peaks_ENCFF736NYC.bed", col_names = FALSE)
-colnames(chip) <- c("chr", "start", "end", "name", "score", "strand", "signalValue", "pval", "qval", "peak")
-chip_gr <- makeGRangesFromDataFrame(chip)
-chip_gr$qval <- chip$qval
-chip_gr$peak_mid <- (start(chip_gr) + end(chip_gr))/2
-
-anchors <- chip_gr %>% 
-  plyranges::anchor_center() %>% 
-  plyranges::mutate(width = 60)
-```
-
-``` r
-ctcf_motifs<- readRDS(file = "/aryeelab/users/corri/data/ALL_FIMO_CTCF_hg38.RDS")
-
-# Subset to 19bp (vs 34bp, 35bp) CTCF motifs that overlap a hires anchor
-# NOTE: In the current input file, they are all 19bp
-gr_motifs <- ctcf_motifs[width(ctcf_motifs)==19]
-# Remove overlapping motifs
-keep <- countOverlaps(gr_motifs, gr_motifs, ignore.strand=TRUE)==1 
-table(keep)
-gr_motifs <- gr_motifs[keep]
-keep <- countOverlaps(gr_motifs, anchors, maxgap = 0)>=1 
-table(keep) 
-gr_motifs <- gr_motifs[keep]
-gr_motifs$motif_mid <- round(start(gr_motifs) + width(gr_motifs)/2)
-```
-
-**Percent of short fragments (\< 80bp) overlapping CBS**
-
-``` r
-gr_fragment80 <- gr_fragment[width(gr_fragment)<=80]
-keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
-100*length(keep)/length(gr_fragment80)
-```
-
-*6.43%*
-
-**Percent of mid-size fragments (80:120bp) overlapping CBS**
-
-``` r
-gr_fragment80 <- gr_fragment[ (width(gr_fragment)>80) & (width(gr_fragment)<=120) ]
-keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
-100*length(keep)/length(gr_fragment80)
-```
-
-*2.11%*
-
-**Percent of long fragments (\>120bp) overlapping CBS**
-
-``` r
-gr_fragment80 <- gr_fragment[width(gr_fragment)>120]
-keep <- subsetByOverlaps(gr_fragment80, gr_motifs, maxgap = 0, ignore.strand=TRUE) 
-100*length(keep)/length(gr_fragment80)
-```
-
-*0.64%*
-
-# Figure 1E
-
-Figure 1E is a schematic made in biorender, so no R code is required.
-(Inserted below for reference.)
-
-<img src="Figures/MNase_cut.png" width="100%" />
 
 # Figure 1F
 
