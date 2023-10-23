@@ -49,11 +49,7 @@ path <- "/aryeelab/users/corri/data/replicate_FF_results/"
 
 # Supplemental Figure 1
 
-stats_50bp.txt
-stats_75bp.txt
-stats_100bp.txt 
-stats_125bp.txt  
-stats_150bp.txt
+Files I'm using: stats_50bp.txt, stats_75bp.txt, stats_100bp.txt, stats_125bp.txt, stats_150bp.txt
 
 Note to self: files moved from "/data/aryee/corri/CTCF_paper_fastq_dif_length/" to /aryeelab/users/corri/data/
 
@@ -213,6 +209,50 @@ See Figure5.Rmd for the code to make this figure. Shown below for reference.
 <img src="Figures/S_LME.png" width="100%" />
 
 # Supplemental Figure 5
+
+*We previously made this file in Figure 1 RMD.*
+```{r}
+df_LR <- readRDS(file = paste0(path, "k562_ctcf_coverage_1000bp_fragment_length_LR.rds"))
+```
+
+```{r,fig.width = 10, fig.height = 5}
+df_LR %>% 
+  filter(size == "(120,151]") %>% 
+  mutate(dist_to_motif_center = pos_in_window-500) %>% 
+  group_by(fragment, motif_strand) %>% 
+  mutate(motif_tot = sum(cov, na.rm = T)) %>% 
+  mutate(cov = (cov / motif_tot)) %>%  
+  ungroup() %>% 
+  group_by(dist_to_motif_center, size,fragment, motif_strand) %>% 
+  summarise(cov=sum(cov, na.rm=T)) %>% 
+  ungroup() %>% 
+  mutate(motif_strand = factor(motif_strand, levels=c("+ Motif", "- Motif"))) %>% 
+  ggplot(aes(x = dist_to_motif_center, y=cov, col = motif_strand)) + 
+  geom_line(linewidth = 1) +
+  geom_vline(xintercept = 0, color="black", linetype ="dashed") + 
+  scale_color_manual(values=c("darkblue", "darkred")) +
+  facet_grid(size ~ fragment,scales = "free")+
+  scale_x_continuous(breaks = seq(-600, 600, 200)) +
+  xlab("Distance to CTCF motif center") +
+  ylab("Total Coverage") +
+  theme_classic()+
+  theme(panel.grid.major = element_line(color = "#f0f0f0",
+                                        size = 0.5))+
+  theme(plot.title = element_text(color = "black", family = "Times New Roman", size = 18, face = "bold"),
+        axis.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.text.y = element_text(color = "black", family = "Times New Roman", size = 16,face = "bold"),
+        axis.title.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.title.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        axis.ticks.x=element_blank(),
+        legend.text=element_text(color = "black", family = "Times New Roman", size =18,face = "bold"),
+        legend.title=element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.x = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.text.y = element_text(color = "black", family = "Times New Roman", size = 18,face = "bold"),
+        strip.background=element_rect(colour="#f0f0f0",fill="#f0f0f0"))+
+  labs(col = "Motif Strand")
+#ggsave(paste0(path,"Supplement_DN.png"), width=10, height=5)
+```
+
 
 
 <img src="Figures/Supplement_DN.png" width="100%" />
