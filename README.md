@@ -15,6 +15,7 @@
 
 - [x] [Protocol_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Protocol_Revisions.Rmd) makes the files we use to generate the graphs in the figure files.
   - [x] [Protocol_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Protocol_Revisions.md) is the corresponding human readable version
+        
 - [x] [Figure1_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure1_Revisions.Rmd) makes the figures contained in *Figure 1* of the paper.
   - [x] [Figure1_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure1_Revisions.md) is the corresponding human readable version
 - [x] [Figure2_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure2_Revisions.Rmd) makes the figures contained in *Figure 2* of the paper.
