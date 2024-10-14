@@ -6,7 +6,7 @@
 **This code repository contains all code needed to reproduce the results in "High-resolution CTCF footprinting reveals impact of chromatin state on cohesin extrusion dynamics".**
 
 **Here's a graphical overview of our main findings from this paper:**
-<img width="1500" alt="image" src="https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/76671bb52ade16255807c9c43bc5b41115cff151/Figures/Graphical_Abstract.png">
+<img width="1500" alt="image" src="Figures/Graphical_Abstract_Oct_14_2024.png">
 
 **To learn more about this project, click on this [link](https://www.biorxiv.org/content/10.1101/2023.10.20.563340v3) to access our manuscript**
 
