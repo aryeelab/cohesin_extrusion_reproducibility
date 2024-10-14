@@ -13,7 +13,7 @@
 ## Workflow
 **To reproduce the results, start at the Protocol RMD file, then move through the figure files. Note that the MD files provide a more readable representation of these RMD files if you're interested in looking through the code but not running it.**
 
-- [ ] `Protocol_Revisions.Rmd` makes the files we use to generate the graphs in the figure files.
+- [ ] [Protocol_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Protocol_Revisions.Rmd) makes the files we use to generate the graphs in the figure files.
 - [ ] `Figure1_Revisions.Rmd` makes the figures contained in *Figure 1* of the paper.
 - [ ] `Figure2_Revisions.Rmd` makes the figures contained in *Figure 2* of the paper.
 - [ ] `Figure3_Revisions.Rmd` makes the figures contained in *Figure 3* of the paper.
