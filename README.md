@@ -15,11 +15,17 @@
 
 - [x] [Protocol_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Protocol_Revisions.Rmd) makes the files we use to generate the graphs in the figure files.
   - [x] [Protocol_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Protocol_Revisions.md) is the corresponding human readable version
-- [ ] `Figure1_Revisions.Rmd` makes the figures contained in *Figure 1* of the paper.
-- [ ] `Figure2_Revisions.Rmd` makes the figures contained in *Figure 2* of the paper.
-- [ ] `Figure3_Revisions.Rmd` makes the figures contained in *Figure 3* of the paper.
-- [ ] `Figure4_Revisions.Rmd` makes the figures contained in *Figure 4* of the paper.
-- [ ] `Figure5_Revisions.Rmd` makes the figures contained in *Figure 5* of the paper.
-- [ ] `Supplement_Revisions.Rmd` makes the figures contained in the *Supplemental Figures* of the paper.
-
+- [x] [Figure1_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure1_Revisions.Rmd) makes the figures contained in *Figure 1* of the paper.
+  - [x] [Figure1_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure1_Revisions.md) is the corresponding human readable version
+- [x] [Figure2_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure2_Revisions.Rmd) makes the figures contained in *Figure 2* of the paper.
+  - [x] [Figure2_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure2_Revisions.md) is the corresponding human readable version
+- [x] [Figure3_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure3_Revisions.Rmd) makes the figures contained in *Figure 3* of the paper.
+  - [x] [Figure3_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure3_Revisions.md) is the corresponding human readable version
+- [x] [Figure4_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure4_Revisions.Rmd) makes the figures contained in *Figure 4* of the paper.
+  - [x] [Figure4_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure4_Revisions.md) is the corresponding human readable version
+- [x] [Figure5_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure5_Revisions.Rmd) makes the figures contained in *Figure 5* of the paper.
+  - [x] [Figure5_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Figure5_Revisions.md) is the corresponding human readable version
+- [x] [Supplement_Revisions.Rmd](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Supplement_Revisions.Rmd) makes the figures contained in the *Supplemental Figures* of the paper.
+  - [x] [Supplement_Revisions.md](https://github.com/aryeelab/cohesin_extrusion_reproducibility/blob/main/Supplement_Revisions.md) is the corresponding human readable version
+  
 To easily see which code generates which graphs without running anything, check out the .md files (e.g. `Figure4_Revisions.md`). 
