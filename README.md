@@ -1,4 +1,4 @@
-# CAMEL and cohesin extrusion analyses <img src="Figures/CAMEL_logo.png" width="100">
+# CAMEL <img src="Figures/CAMEL_logo.png" width="100"> and cohesin extrusion analyses
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ## About
