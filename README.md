@@ -14,3 +14,11 @@
 **To reproduce the results, start at the Protocol RMD file, then move through the figure files. Note that the MD files provide a more readable representation of these RMD files if you're interested in looking through the code but not running it.**
 
 - [ ] `Protocol_Revisions.Rmd` makes the files we use to generate the graphs in the figure files.
+- [ ] `Figure1_Revisions.Rmd` makes the figures contained in *Figure 1* of the paper.
+- [ ] `Figure2_Revisions.Rmd` makes the figures contained in *Figure 2* of the paper.
+- [ ] `Figure3_Revisions.Rmd` makes the figures contained in *Figure 3* of the paper.
+- [ ] `Figure4_Revisions.Rmd` makes the figures contained in *Figure 4* of the paper.
+- [ ] `Figure5_Revisions.Rmd` makes the figures contained in *Figure 5* of the paper.
+- [ ] `Supplement_Revisions.Rmd` makes the figures contained in the *Supplemental Figures* of the paper.
+
+To easily see which code generates which graphs without running anything, check out the .md files (e.g. `Figure4_Revisions.md`). 
